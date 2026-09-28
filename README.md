@@ -24,7 +24,7 @@
 - `npm test` — vitest (client: jsdom, desktop: node).
 - `npm run typecheck`
 - `npm run build` — electron-vite bundle into `desktop/out`.
-- `npm run icons -w desktop` — re-render the tray and app icon PNGs after editing `desktop/build/*.svg`.
+- `npm run icons -w desktop` — re-render the menu bar dots and the app icon PNG (after editing `desktop/scripts/render-icons.mjs` or `desktop/build/icon.svg`).
 - `npm run pack` — build, then electron-builder for this platform into `desktop/dist-app` (mac: arm64 dmg, ad-hoc signed; win: x64 NSIS installer, unsigned).
 
 ## One-time setup per computer

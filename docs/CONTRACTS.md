@@ -118,10 +118,11 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D10** — Activity comes from git history only: day summaries, bursts of under 20 min from the same computer collapsed, file search, paging.
 - **D11** — Files of 95 MiB or more are held back and listed; everything else syncs.
 - **D12** — Use git's existing login (`gh auth login` + `gh auth setup-git`). `ls-remote` checks access when a folder is added.
-- **D13** — Octopus menu bar icon with a status dot.
+- **D13** — The octopus is the app icon (superseded in the menu bar by D20).
 - **D14** — GitHub-Desktop-style GUI.
 - **D15** — Confirmation before any on/off change, with Cancel focused.
 - **D16** — Commit subject `sync (<host>): …`. Busy repos are skipped with zero writes. Every problem has a Copy AI prompt.
 - **D17** — The Dock icon is hidden while the window is.
 - **D18** — Folder right-click menu with nicknames (Rename in AutoSync), Terminal and VS Code.
-- **D19** — Theme System/Light/Dark for the window; the menu bar icon follows the OS menu bar, not the app theme.
+- **D19** — Theme System/Light/Dark for the window.
+- **D20** — The menu bar icon is a big status dot (grey ring with no folders); paused is red with ⏸; the octopus stays the app icon.

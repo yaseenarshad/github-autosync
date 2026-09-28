@@ -3,13 +3,13 @@ import { byWorst, clock, headline, lastSyncedAt, plural } from '@shared/status'
 import type { AppStatus, FolderStatus, NavTarget, SyncState } from '@shared/types'
 
 /**
- * What the menu bar octopus shows and what its menu says — pure, so both are tested without a
+ * What the menu bar dot shows (D20) and what its menu says — pure, so both are tested without a
  * tray. `tray.ts` only turns these into pixels and a native menu.
  */
 
 export type TrayState = 'plain' | 'synced' | 'pending' | 'attention' | 'syncing' | 'paused'
 
-/** The one state the icon shows: paused says paused; no folder switched on shows the bare octopus; else the worst one. */
+/** The one state the dot shows: paused (red, pause bars) beats everything; no folder switched on is the grey ring; else the worst one. */
 export function trayState(status: AppStatus): TrayState {
   if (status.paused) return 'paused'
   const [worst] = status.folders
@@ -17,16 +17,6 @@ export function trayState(status: AppStatus): TrayState {
     .filter((s): s is Exclude<SyncState, 'off'> => s !== 'off')
     .sort(byWorst)
   return worst ?? 'plain'
-}
-
-/**
- * Which icon set suits the MENU BAR / taskbar — the OS's own appearance, never the app's theme
- * (D19): forcing the window light must not paint a black octopus on a dark menu bar. macOS: the
- * system-wide `AppleInterfaceStyle` default. Windows: whether the taskbar is dark.
- */
-export function trayVariant(platform: NodeJS.Platform, os: { appleInterfaceStyle: string; systemUiDark: boolean }): 'dark' | 'light' {
-  const dark = platform === 'darwin' ? os.appleInterfaceStyle === 'Dark' : os.systemUiDark
-  return dark ? 'dark' : 'light'
 }
 
 function subline(status: AppStatus): string {
