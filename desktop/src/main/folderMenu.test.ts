@@ -27,7 +27,7 @@ describe('folderMenuTemplate (D18)', () => {
       'Copy AI prompt',
       '---',
       'View on GitHub',
-      'Show in Finder',
+      'Reveal in Finder',
       'Open in Terminal',
       'Open in VS Code',
       '---',
@@ -47,7 +47,7 @@ describe('folderMenuTemplate (D18)', () => {
       'Copy folder name',
       'Copy path',
       '---',
-      'Show in Finder',
+      'Reveal in Finder',
       'Open in Terminal',
       'Open in VS Code',
       '---',
@@ -68,7 +68,7 @@ describe('folderMenuTemplate (D18)', () => {
 
   it('uses Windows words on Windows', () => {
     const items = folderMenuTemplate(folder(), { ...MAC, platform: 'win32' }, actions())
-    expect(labels(items)).toContain('Show in File Explorer')
+    expect(labels(items)).toContain('Reveal in File Explorer')
     expect(labels(items)).toContain('Open in Command Prompt')
   })
 
@@ -76,7 +76,7 @@ describe('folderMenuTemplate (D18)', () => {
     const a = actions()
     const f = folder({ alias: 'Notes', name: 'Notes', attention: { kind: 'auth' }, state: 'attention' })
     const items = folderMenuTemplate(f, MAC, a)
-    for (const label of ['Turn off syncing…', 'Copy AI prompt', 'Rename in AutoSync…', 'Remove…', 'Copy folder name', 'Copy path', 'Copy GitHub URL', 'Sync now', 'View on GitHub', 'Show in Finder', 'Open in Terminal', 'Open in VS Code', 'Remove nickname']) click(items, label)
+    for (const label of ['Turn off syncing…', 'Copy AI prompt', 'Rename in AutoSync…', 'Remove…', 'Copy folder name', 'Copy path', 'Copy GitHub URL', 'Sync now', 'View on GitHub', 'Reveal in Finder', 'Open in Terminal', 'Open in VS Code', 'Remove nickname']) click(items, label)
     expect(a.navigate.mock.calls.map(([t]) => t)).toEqual([
       { folderId: 'a', sheet: 'folder-off' },
       { folderId: 'a', copyPrompt: true },

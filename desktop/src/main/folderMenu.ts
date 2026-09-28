@@ -43,7 +43,7 @@ export function folderMenuTemplate(folder: FolderStatus, ctx: FolderMenuContext,
     ],
     [
       web === null ? null : { label: 'View on GitHub', click: () => actions.viewOnGitHub(web) },
-      { label: win ? 'Show in File Explorer' : 'Show in Finder', click: () => actions.showInFinder() },
+      { label: win ? 'Reveal in File Explorer' : 'Reveal in Finder', click: () => actions.showInFinder() },
       { label: win ? 'Open in Command Prompt' : 'Open in Terminal', click: () => actions.openInTerminal() },
       { label: 'Open in VS Code', click: () => actions.openInEditor() },
     ],
