@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
 import { formatBytes, plural, tildify, webLabel } from '../lib/format'
+import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
 import { folderView, type FolderView } from '../lib/summary'
 import { ActivityLog } from './ActivityLog'
@@ -95,33 +96,19 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
 
       <div className="section">
         <div className="actions">
-          <Action
-            title="View the files in Finder"
-            detail={
-              <>
-                Folder menu or <span className="kbd">⌘⇧F</span>
-              </>
-            }
-          >
+          <Action title={`View the files in ${platform.fileManager}`} detail={<span className="kbd">{platform.shortcut('F')}</span>}>
             <button className="btn" onClick={() => api.showInFinder(f.id)}>
-              Show in Finder
+              Show in {platform.fileManager}
             </button>
           </Action>
           {f.webUrl && (
-            <Action
-              title="Open the repository on GitHub"
-              detail={
-                <>
-                  Folder menu or <span className="kbd">⌘⇧G</span>
-                </>
-              }
-            >
+            <Action title="Open the repository on GitHub" detail={<span className="kbd">{platform.shortcut('G')}</span>}>
               <button className="btn" onClick={() => api.openExternal(f.webUrl!)}>
                 View on GitHub
               </button>
             </Action>
           )}
-          <Action title="Stop syncing this folder" detail="Removes it from AutoSync only. Files stay on your Mac and on GitHub.">
+          <Action title="Stop syncing this folder" detail={`Removes it from AutoSync only. Files stay on ${platform.yours} and on GitHub.`}>
             <button className="btn red" onClick={() => onSheet({ kind: 'remove', id: f.id })}>
               <Icon name="trash" />
               Remove
@@ -186,7 +173,7 @@ function problemText(a: Attention): { title: string; body: string } {
       const n = a.conflicts?.length ?? 0
       return {
         title: `${plural(n, 'file')} ${n === 1 ? 'was' : 'were'} edited on two computers`,
-        body: "Both versions are kept — nothing is lost and syncing keeps going. The other computer's version stays in place; this Mac's version is saved next to it. Merge them when you're ready.",
+        body: `Both versions are kept — nothing is lost and syncing keeps going. The other computer's version stays in place; ${platform.here}'s version is saved next to it. Merge them when you're ready.`,
       }
     }
     case 'auth':
@@ -244,7 +231,7 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
         <CopyPromptButton text={prompt} className="btn blue" />
         <button className="btn" onClick={() => window.autosync.showInFinder(f.id)}>
           <Icon name="folder" />
-          Show in Finder
+          Show in {platform.fileManager}
         </button>
         <button className="btn" onClick={() => window.autosync.syncNow(f.id)}>
           <Icon name="sync" />I fixed it — check again
@@ -271,11 +258,12 @@ function TooBigCard({ folder: f }: { folder: FolderStatus }) {
       <div className="cb">
         {f.tooBig.length === 1 ? (
           <>
-            <span className="mono">{one.path}</span> is {formatBytes(one.bytes)}. GitHub rejects files over 100 MB, so it stays on this Mac
+            <span className="mono">{one.path}</span> is {formatBytes(one.bytes)}. GitHub rejects files over 100 MB, so it stays on{' '}
+            {platform.here}
             only. Everything else synced.
           </>
         ) : (
-          'GitHub rejects files over 100 MB, so these stay on this Mac only. Everything else synced. They’re listed under “What’s not syncing”.'
+          `GitHub rejects files over 100 MB, so these stay on ${platform.here} only. Everything else synced. They’re listed under “What’s not syncing”.`
         )}
       </div>
       <div className="acts">
@@ -319,7 +307,9 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
               !
             </span>
             <span className="f">{t.path}</span>
-            <span className="m">Too big ({formatBytes(t.bytes)}) — stays on this Mac</span>
+            <span className="m">
+              Too big ({formatBytes(t.bytes)}) — stays on {platform.here}
+            </span>
           </div>
         ))}
         {ignored && (

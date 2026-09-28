@@ -15,6 +15,7 @@ import { plural } from '../lib/format'
 import { clock, exact, MINUTE } from '../lib/time'
 import { Icon, type IconName } from './Icon'
 import { Ago, Stamp, useNow } from './Time'
+import { platform } from '../lib/platform'
 
 const FIRST_DAYS = 4
 const MORE_DAYS = 7
@@ -29,7 +30,7 @@ const KIND: Record<ActivityKind, { icon: IconName; cls: string }> = {
 function title(e: ActivityEntry): string {
   switch (e.kind) {
     case 'sent':
-      return `Sent ${plural(e.files.length, 'file')} from this Mac`
+      return `Sent ${plural(e.files.length, 'file')} from ${platform.here}`
     case 'received':
       return `Received ${plural(e.files.length, 'file')} from ${e.host}`
     case 'conflict':
@@ -149,7 +150,7 @@ export function ActivityLog({ folder }: { folder: FolderStatus }) {
           </span>
           <div className="grow">
             <div className="who">
-              {newest.kind === 'sent' ? 'Sent' : 'Received'} {run.length} times from {newest.kind === 'sent' ? 'this Mac' : newest.host}{' '}
+              {newest.kind === 'sent' ? 'Sent' : 'Received'} {run.length} times from {newest.kind === 'sent' ? platform.here : newest.host}{' '}
               <span className="muted normal">
                 · {plural(files.length, 'file')} · {minutes} min
               </span>

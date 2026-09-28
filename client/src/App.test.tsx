@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AutoSyncApi } from '@shared/api'
 import type { ActivityPage, AppStatus } from '@shared/types'
 import { App } from './App'
+import { platform } from './lib/platform'
 import { makeEntry, makeFolder, makeStatus } from './test/fixtures'
 
 let root: Root
@@ -56,6 +57,11 @@ async function click(el: HTMLElement) {
 }
 
 const dialog = () => document.querySelector('[role="dialog"]')
+
+async function shortcut(key: string) {
+  const mod = platform.mac ? { metaKey: true } : { ctrlKey: true }
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: true, ...mod })))
+}
 const oneFolder = makeStatus([makeFolder({ id: 'notes', name: 'notes', lastSyncedAt: Date.now() })])
 
 describe('confirmations (D15)', () => {
@@ -139,7 +145,7 @@ it('folder page: problem card copies its prompt, activity collapses bursts', asy
 
   expect(container.textContent).toContain('Still syncing — but something needs you')
   expect(container.textContent).toContain('1 file was edited on two computers')
-  expect(container.textContent).toContain('Sent 3 times from this Mac')
+  expect(container.textContent).toContain(`Sent 3 times from ${platform.here}`)
   expect(container.textContent).toContain('Committed by Yasin: Tidy up')
 
   await click(button('Copy AI prompt'))
@@ -148,4 +154,34 @@ it('folder page: problem card copies its prompt, activity collapses bursts', asy
 
   await click(button('I fixed it — check again'))
   expect(api.syncNow).toHaveBeenCalledWith('notes')
+})
+
+describe('folder shortcuts', () => {
+  it('Show in file manager and View on GitHub act on the selected folder', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await shortcut('F')
+    expect(api.showInFinder).toHaveBeenCalledWith('notes')
+    await shortcut('G')
+    expect(api.openExternal).toHaveBeenCalledWith('https://github.com/yasin/notes')
+  })
+
+  it('do nothing on All folders or while a sheet is open', async () => {
+    const api = await mount(oneFolder)
+    await shortcut('F')
+    await shortcut('G')
+    await click(button('notes'))
+    await click(button('Remove'))
+    await shortcut('F')
+    expect(api.showInFinder).not.toHaveBeenCalled()
+    expect(api.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('need the modifier and Shift', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', shiftKey: true })))
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true, ctrlKey: true })))
+    expect(api.showInFinder).not.toHaveBeenCalled()
+  })
 })
