@@ -1,3 +1,5 @@
+import { clock } from '@shared/status'
+
 export const SECOND = 1000
 export const MINUTE = 60 * SECOND
 export const HOUR = 60 * MINUTE
@@ -12,11 +14,6 @@ export function startOfDay(t: number): number {
 // Calendar days, not 24 h spans: 11:50 PM yesterday is "Yesterday" at 12:05 AM.
 function daysBefore(t: number, now: number): number {
   return Math.round((startOfDay(now) - startOfDay(t)) / DAY)
-}
-
-/** "5:51 PM" */
-export function clock(t: number): string {
-  return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
 /** "5:51 PM" today, "Yesterday 4:12 PM", "Sep 25, 9:03 AM". */

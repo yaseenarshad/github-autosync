@@ -1,5 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode.
 import path from 'node:path'
+import { DEBOUNCE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, WAKE_COOLDOWN_MS } from '@shared/status'
 import type { Attention, FileChange, FolderStatus, OtherApp, SyncState, TooBigFile } from '@shared/types'
 import { webUrlOf } from './detect'
 import type { PassResult } from './sync'
@@ -11,7 +12,7 @@ import type { PassResult } from './sync'
  * Electron-free by construction — the pass, the watcher and the broadcast arrive through
  * `SyncHost`, so the whole state machine is testable with a fake host.
  *
- * The cadence, in one place so it can be argued with:
+ * The cadence (its numbers live in `shared/status.ts`, which the UI words from too):
  *   - START and ENABLE pull: a folder turns on with a pass.
  *   - EDITS settle first. A watcher event is only a hint: once the burst pauses (`peekMs`, 1 s)
  *     `git status` says whether anything really changed. Real changes mark the folder pending and
@@ -73,13 +74,6 @@ export interface SyncManager {
   notifyWake(): void
   flushForQuit(): Promise<void>
 }
-
-const DEFAULT_QUIET_MS = 30_000
-const DEFAULT_RETRY_MS = 120_000
-const DEFAULT_POLL_MS = 60_000
-const DEFAULT_WAKE_COOLDOWN_MS = 10_000
-const DEFAULT_PEEK_MS = 1_000
-const DEFAULT_OWN_WRITES_MS = 1_000
 
 type Timer = ReturnType<typeof setTimeout>
 
@@ -233,12 +227,12 @@ function crashed(err: unknown): PassResult {
 }
 
 export function createSyncManager(host: SyncHost): SyncManager {
-  const quietMs = host.quietMs ?? DEFAULT_QUIET_MS
-  const retryMs = host.retryMs ?? DEFAULT_RETRY_MS
-  const pollMs = host.pollMs ?? DEFAULT_POLL_MS
-  const wakeCooldownMs = host.wakeCooldownMs ?? DEFAULT_WAKE_COOLDOWN_MS
-  const peekMs = host.peekMs ?? DEFAULT_PEEK_MS
-  const ownWritesMs = host.ownWritesMs ?? DEFAULT_OWN_WRITES_MS
+  const quietMs = host.quietMs ?? DEBOUNCE_MS
+  const retryMs = host.retryMs ?? OFFLINE_RETRY_MS
+  const pollMs = host.pollMs ?? POLL_MS
+  const wakeCooldownMs = host.wakeCooldownMs ?? WAKE_COOLDOWN_MS
+  const peekMs = host.peekMs ?? PEEK_MS
+  const ownWritesMs = host.ownWritesMs ?? OWN_WRITES_MS
 
   /** Registry order. */
   let entries = new Map<string, Entry>()
@@ -338,18 +332,22 @@ export function createSyncManager(host: SyncHost): SyncManager {
     e.peek = arm(peekMs, () => {
       e.peek = null
       if (e.busy) return
-      void host.peek(e.cfg.path).then((pending) => {
-        if (pending === null || e.busy || !e.active || !current(e)) return
-        setPending(e, pending)
-        if (e.pending.length > 0 && e.debounce === null) armDebounce(e)
-        if (e.pending.length === 0 && e.debounce !== null) {
-          // Undone before it was sent: nothing to send, so back to idling.
-          clearTimeout(e.debounce)
-          e.debounce = e.sendAt = null
-          armPoll(e)
-        }
-        host.onChange()
-      })
+      // A peek that throws (the folder vanished mid-read) is a look that found nothing to say; the next pass reports the folder.
+      void host
+        .peek(e.cfg.path)
+        .catch(() => null)
+        .then((pending) => {
+          if (pending === null || e.busy || !e.active || !current(e)) return
+          setPending(e, pending)
+          if (e.pending.length > 0 && e.debounce === null) armDebounce(e)
+          if (e.pending.length === 0 && e.debounce !== null) {
+            // Undone before it was sent: nothing to send, so back to idling.
+            clearTimeout(e.debounce)
+            e.debounce = e.sendAt = null
+            armPoll(e)
+          }
+          host.onChange()
+        })
     })
   }
 

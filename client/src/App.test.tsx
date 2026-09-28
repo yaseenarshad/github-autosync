@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AutoSyncApi } from '@shared/api'
-import type { ActivityPage, AppStatus, NavTarget } from '@shared/types'
+import type { ActivityPage, AppStatus, FolderVerdict, NavTarget } from '@shared/types'
 import { App } from './App'
 import { platform } from './lib/platform'
-import { makeEntry, makeFolder, makeStatus } from './test/fixtures'
+import { makeEntry, makeFolder, makeStatus } from '@shared/testFixtures'
 
 let root: Root
 let container: HTMLElement
@@ -19,9 +19,9 @@ function mockApi(status: AppStatus) {
       navigate = listener
       return () => {}
     }),
-    pickFolder: vi.fn(),
-    checkFolder: vi.fn(),
-    addFolder: vi.fn(),
+    pickFolder: vi.fn(async (): Promise<string | null> => null),
+    checkFolder: vi.fn(async (): Promise<FolderVerdict> => ({ ok: false, path: '', reason: 'not-git' })),
+    addFolder: vi.fn(async () => status),
     removeFolder: vi.fn(async () => status),
     setFolderEnabled: vi.fn(async () => status),
     setPaused: vi.fn(async () => status),
@@ -260,5 +260,84 @@ describe('theme (D19)', () => {
     await click(radio('Dark') as HTMLButtonElement)
 
     expect(api.setTheme).toHaveBeenCalledWith('dark')
+  })
+})
+
+describe('folder page wording', () => {
+  // Fixed clock so the countdowns read exactly.
+  const at = new Date(2026, 8, 27, 12).getTime()
+  const change = { status: 'M' as const, path: 'a.md' }
+  const text = (selector: string) => document.querySelector(selector)?.textContent
+
+  async function show(extra: Parameters<typeof makeFolder>[0]) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(at)
+    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ...extra })]))
+    await click(button('notes'))
+  }
+
+  it('one file too big for GitHub', async () => {
+    await show({ tooBig: [{ path: 'video.mov', bytes: 150 * 1024 ** 2 }] })
+    expect(text('.card.warn .cb')).toBe(`video.mov is 150 MB. GitHub rejects files over 100 MB, so it stays on ${platform.here} only. Everything else synced.`)
+  })
+
+  it('offline, with the retry counting down', async () => {
+    await show({ state: 'pending', offline: true, pending: [change], retryAt: at + 90_000 })
+    expect(text('.status .s')).toBe("1 change is saved here and will send when you're back online. Retrying in 1:30.")
+  })
+
+  it('pending, with the send counting down', async () => {
+    await show({ state: 'pending', pending: [change, change], sendAt: at + 23_000 })
+    expect(text('.status .s')).toBe('Sends in 0:23 — 30s after you stop editing.')
+  })
+})
+
+describe('add folder (D12)', () => {
+  const inSheet = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.includes(label))!
+  const verdictText = () => document.querySelector('.verdict')?.textContent
+
+  async function pick(verdict: FolderVerdict) {
+    const api = await mount(oneFolder)
+    api.pickFolder.mockResolvedValue(verdict.path)
+    api.checkFolder.mockResolvedValue(verdict)
+    await click(button('Add folder'))
+    return api
+  }
+
+  const path = '/Users/yasin/Documents/GitHub/new-repo'
+  it.each<[string, FolderVerdict, string]>([
+    ['already added', { ok: false, path, reason: 'already-added' }, 'Already added.'],
+    ['not git', { ok: false, path, reason: 'not-git' }, 'Not a git folder. AutoSync only syncs folders that are already git repositories.'],
+    ['no origin', { ok: false, path, reason: 'no-origin' }, 'This is a git folder but it has no GitHub remote (“origin”), so there\'s nowhere to sync to.'],
+    ['auth', { ok: false, path, reason: 'auth' }, `It's a one-time fix: run “gh auth login” in ${platform.terminal}, then try again.`],
+    ['no git', { ok: false, path, reason: 'no-git' }, "Git isn't installed on this computer, so AutoSync can't sync anything yet."],
+  ])('%s: says why, and Add stays off', async (_, verdict, words) => {
+    const api = await pick(verdict)
+    expect(verdictText()).toContain(words)
+    expect(inSheet('Add folder').disabled).toBe(true)
+    await click(inSheet('Add folder'))
+    expect(api.addFolder).not.toHaveBeenCalled()
+  })
+
+  it('a folder another app syncs, while offline: warns, and adds on click', async () => {
+    const api = await pick({ ok: true, path, warning: 'Draw', offline: true })
+    expect(verdictText()).toBe("The Draw app also syncs this folder. You can still add it — both will sync. Nothing gets lost, it's just noisier. Couldn't reach GitHub right now — it will retry.")
+    api.addFolder.mockResolvedValue(makeStatus([makeFolder({ id: 'new', path })]))
+    await click(inSheet('Add folder'))
+    expect(api.addFolder).toHaveBeenCalledWith(path)
+    expect(dialog()).toBeNull()
+  })
+
+  it('inside a repo: offers the top of it, and "Use" checks that folder again', async () => {
+    const root = '/Users/yasin/Documents/GitHub/notes'
+    const api = await pick({ ok: false, path: `${root}/client`, reason: 'not-root', root })
+    expect(verdictText()).toContain('This is inside a git folder, not the top of one. Pick ~/Documents/GitHub/notes instead.')
+
+    api.checkFolder.mockResolvedValue({ ok: true, path: root, warning: null, offline: false })
+    await click(inSheet('Use ~/Documents/GitHub/notes'))
+
+    expect(api.checkFolder).toHaveBeenLastCalledWith(root)
+    expect(verdictText()).toBe('Git folder with a GitHub remote. Ready to sync.')
+    expect(inSheet('Add folder').disabled).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeEntry } from '../test/fixtures'
+import { makeEntry } from '@shared/testFixtures'
 import { appendPage, fileList, filterEntries, groupDays, groupRuns, mergeFirstPage, RUN_GAP } from './activity'
 import { MINUTE } from './time'
 

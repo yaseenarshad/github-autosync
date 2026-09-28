@@ -28,7 +28,7 @@ export function classify(subject: string, author: string, files: ActivityEntry['
   return { kind: host === thisHost ? 'sent' : 'received', host }
 }
 
-export function parseLog(stdout: string, thisHost: string): ActivityEntry[] {
+function parseLog(stdout: string, thisHost: string): ActivityEntry[] {
   return stdout
     .split('\x1e')
     .filter((chunk) => chunk !== '')

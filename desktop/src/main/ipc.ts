@@ -18,7 +18,6 @@ import { newFolder, withAlias, type Config, type Registry } from './registry'
 export interface IpcDeps {
   registry: Registry
   manager: SyncManager
-  hostname: string
   status(): AppStatus
   /** Pushes the registry's config to the manager and the OS (login item). */
   apply(): void
@@ -30,8 +29,7 @@ export interface IpcDeps {
 export const isGithubUrl = (url: string): boolean => url.startsWith('https://github.com/')
 
 /**
- * `vscode://file/<path>` — the OS decides which VS Code answers, so nothing is spawned (the Docs
- * app's approach). Each segment is percent-encoded with the separators left literal; a Windows
+ * `vscode://file/<path>` — the OS decides which VS Code answers, so nothing is spawned. Each segment is percent-encoded with the separators left literal; a Windows
  * path gets forward slashes and keeps its drive (`/C:/Users/…`).
  */
 export function vscodeUrl(folderPath: string): string {
@@ -86,7 +84,7 @@ export function registerIpc(deps: IpcDeps): void {
     setFolderEnabled: async (id, enabled) => change((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? { ...f, enabled } : f)) })),
     setPaused: async (paused) => change((c) => ({ ...c, paused })),
     syncNow: (id) => manager.syncNow(id),
-    activity: async (id, cursor) => readActivity(folderPath(id), deps.hostname, cursor),
+    activity: async (id, cursor) => readActivity(folderPath(id), deps.status().hostname, cursor),
     setLaunchAtLogin: async (on) => change((c) => ({ ...c, launchAtLogin: on })),
     setTheme: async (theme) => change((c) => ({ ...c, theme })),
     showInFinder: async (id) => {

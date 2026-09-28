@@ -1,5 +1,6 @@
 import type { AppStatus, FolderStatus } from '@shared/types'
-import { folderView, overall, summary } from '../lib/summary'
+import { headline, lastSyncedAt } from '@shared/status'
+import { folderView, overall } from '../lib/summary'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
 import { LastSynced } from './Time'
@@ -15,7 +16,7 @@ export function Toolbar({ status, folder, onOverview, onSheet }: Props) {
   const o = overall(status)
   const empty = status.folders.length === 0
   const busy = folder ? folderView(folder, status).cls === 'syncing' : o.syncing > 0
-  const lastSynced = folder ? folder.lastSyncedAt : latest(status.folders.filter((f) => f.enabled).map((f) => f.lastSyncedAt))
+  const lastSynced = folder ? folder.lastSyncedAt : lastSyncedAt(status.folders)
 
   return (
     <div className="toolbar">
@@ -23,7 +24,7 @@ export function Toolbar({ status, folder, onOverview, onSheet }: Props) {
         <span className={`dot ${o.worst}`} />
         <span className="txt">
           <div className="lbl">GitHub AutoSync</div>
-          <div className="val">{summary(status, o)}</div>
+          <div className="val">{headline(status)}</div>
         </span>
       </button>
       <div className="tb tb-2">
@@ -58,9 +59,4 @@ export function Toolbar({ status, folder, onOverview, onSheet }: Props) {
       </button>
     </div>
   )
-}
-
-function latest(times: (number | null)[]): number | null {
-  const known = times.filter((t) => t !== null)
-  return known.length ? Math.max(...known) : null
 }

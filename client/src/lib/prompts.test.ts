@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Attention } from '@shared/types'
-import { makeFolder } from '../test/fixtures'
+import { makeFolder } from '@shared/testFixtures'
 import { attentionPrompt, loginPrompt, noOriginPrompt, tooBigPrompt } from './prompts'
 
 const folder = makeFolder({ path: '/Users/yasin/Documents/GitHub/notes', remoteUrl: 'git@github.com:yasin/notes.git' })

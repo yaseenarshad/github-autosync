@@ -1,5 +1,5 @@
 import type { AppStatus, Attention, FolderStatus, SyncState } from '@shared/types'
-import { plural } from './format'
+import { byWorst, plural } from '@shared/status'
 
 /** Which status-card variant a folder shows; `cls` is the dot/tag colour for it. */
 export type ViewKind = 'off' | 'paused' | 'git-missing' | 'attention' | 'syncing' | 'offline' | 'pending' | 'synced'
@@ -16,7 +16,7 @@ export interface FolderView {
 
 type Globals = Pick<AppStatus, 'paused' | 'gitMissing'>
 
-export function attentionShort(a: Attention): string {
+function attentionShort(a: Attention): string {
   switch (a.kind) {
     case 'conflict':
       return 'Conflict · both kept'
@@ -57,8 +57,6 @@ export function folderView(f: FolderStatus, app: Globals): FolderView {
   return { kind: 'synced', cls: 'synced', short: 'Synced', head: "Everything's synced", icon: 'check' }
 }
 
-export const RANK: Record<SyncState, number> = { attention: 4, pending: 3, syncing: 2, synced: 1, off: 0 }
-
 export interface Overall {
   worst: SyncState
   synced: number
@@ -69,29 +67,10 @@ export interface Overall {
   total: number
 }
 
+/** Counts by the colour each folder shows (so pause and missing git count as they look), and the worst of them. */
 export function overall(status: AppStatus): Overall {
-  const views = status.folders.map((f) => folderView(f, status))
-  const n = (c: SyncState) => views.filter((v) => v.cls === c).length
-  return {
-    worst: views.reduce<SyncState>((w, v) => (RANK[v.cls] > RANK[w] ? v.cls : w), 'off'),
-    synced: n('synced'),
-    pending: n('pending'),
-    syncing: n('syncing'),
-    attention: n('attention'),
-    off: n('off'),
-    total: views.length,
-  }
-}
-
-/** One line for the toolbar and the "All folders" row. */
-export function summary(status: AppStatus, o: Overall = overall(status)): string {
-  if (!o.total) return 'No folders yet'
-  if (status.paused) return 'Paused'
-  if (status.gitMissing) return 'Git not found'
-  if (o.attention) return `${o.attention} ${o.attention === 1 ? 'folder needs' : 'folders need'} you`
-  if (o.pending && status.folders.some((f) => f.enabled && f.offline)) return 'Offline · changes waiting'
-  if (o.syncing) return 'Syncing…'
-  if (o.pending) return `${o.pending} waiting to send`
-  if (o.off === o.total) return 'Sync is off'
-  return 'All synced'
+  const colours = status.folders.map((f) => folderView(f, status).cls)
+  const n = (c: SyncState) => colours.filter((v) => v === c).length
+  const [worst = 'off'] = [...colours].sort(byWorst)
+  return { worst, synced: n('synced'), pending: n('pending'), syncing: n('syncing'), attention: n('attention'), off: n('off'), total: colours.length }
 }

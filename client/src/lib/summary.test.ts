@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Attention } from '@shared/types'
-import { makeFolder, makeStatus } from '../test/fixtures'
-import { folderView, overall, summary } from './summary'
+import { makeFolder, makeStatus } from '@shared/testFixtures'
+import { folderView, overall } from './summary'
 
 const ok = { paused: false, gitMissing: false }
 const change = { status: 'M' as const, path: 'a.md' }
@@ -45,12 +45,11 @@ describe('folderView headline', () => {
   })
 })
 
-describe('overall + summary', () => {
+describe('overall', () => {
   const synced = makeFolder({ id: 's' })
   const pending = makeFolder({ id: 'p', state: 'pending', pending: [change] })
   const syncing = makeFolder({ id: 'y', state: 'syncing', direction: 'up' })
   const conflict = makeFolder({ id: 'c', state: 'attention', attention: { kind: 'conflict', conflicts: [] } })
-  const auth = makeFolder({ id: 'a', state: 'attention', attention: { kind: 'auth' } })
   const off = makeFolder({ id: 'o', enabled: false, state: 'off' })
 
   it('counts by colour and picks the worst', () => {
@@ -60,20 +59,5 @@ describe('overall + summary', () => {
     expect(overall(makeStatus([synced, off])).worst).toBe('synced')
     expect(overall(makeStatus([off])).worst).toBe('off')
     expect(overall(makeStatus([conflict], { paused: true })).worst).toBe('off')
-  })
-
-  it.each([
-    ['no folders', makeStatus([]), 'No folders yet'],
-    ['paused', makeStatus([conflict], { paused: true }), 'Paused'],
-    ['git missing', makeStatus([synced], { gitMissing: true }), 'Git not found'],
-    ['one needs you', makeStatus([conflict, pending]), '1 folder needs you'],
-    ['several need you', makeStatus([conflict, auth]), '2 folders need you'],
-    ['offline', makeStatus([{ ...pending, offline: true }, syncing]), 'Offline · changes waiting'],
-    ['syncing', makeStatus([pending, syncing]), 'Syncing…'],
-    ['waiting', makeStatus([pending, synced]), '1 waiting to send'],
-    ['all synced', makeStatus([synced, off]), 'All synced'],
-    ['all off', makeStatus([off]), 'Sync is off'],
-  ])('%s', (_, status, text) => {
-    expect(summary(status)).toBe(text)
   })
 })

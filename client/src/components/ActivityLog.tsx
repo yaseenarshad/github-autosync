@@ -11,8 +11,8 @@ import {
   type ActivityFilter,
   type Day,
 } from '../lib/activity'
-import { plural } from '../lib/format'
-import { clock, exact, MINUTE } from '../lib/time'
+import { clock, plural } from '@shared/status'
+import { exact, MINUTE } from '../lib/time'
 import { Icon, type IconName } from './Icon'
 import { Ago, Stamp, useNow } from './Time'
 import { platform } from '../lib/platform'

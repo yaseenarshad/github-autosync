@@ -77,7 +77,8 @@ describe('git', () => {
     expect(res.stdout.trim()).toBe('true')
   })
 
-  it('kills a hung child on timeout and resolves -1', async () => {
+  // Windows: `cmd\git.exe` is a launcher; killing it may leave the real git holding the pipes (unverified there).
+  it.skipIf(process.platform === 'win32')('kills a hung child on timeout and resolves -1', async () => {
     // `hash-object --stdin` blocks on a stdin pipe that is never closed: a reliably hanging git.
     const t0 = Date.now()
     const res = await git(await requireGit(), await tempDir(), ['hash-object', '--stdin'], { timeoutMs: 100 })

@@ -5,7 +5,6 @@ import type { FolderStatus } from '@shared/types'
 import { git } from '../git/exec'
 import { gitHost, pushedRepo, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, type BareRemote, type GitRepo } from '../git/gitFixture'
 import { createSyncManager, type SyncHost, type SyncManager } from '../git/manager'
-import { syncFolder } from '../git/sync'
 
 // Real git; the spy counts invocations and, in one case, plays GitHub refusing a sign-in (no network).
 vi.mock('../git/exec', async (actual) => {
@@ -13,7 +12,10 @@ vi.mock('../git/exec', async (actual) => {
   return { ...mod, git: vi.fn(mod.git) }
 })
 
-/** 5B: how the app behaves when things go wrong, through the real manager and real git. */
+/**
+ * 5B: how the app behaves when things go wrong, through the real manager and real git. No git, quit
+ * and paused are proven in guarantees.test.ts.
+ */
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -28,10 +30,10 @@ async function repo(): Promise<{ repo: GitRepo; remote: BareRemote }> {
 }
 
 /** The real manager over one folder; resolves once the start pass has settled. */
-async function start(root: string, over: Partial<SyncHost> = {}, paused = false): Promise<{ manager: SyncManager; status: () => FolderStatus }> {
+async function start(root: string, over: Partial<SyncHost> = {}): Promise<{ manager: SyncManager; status: () => FolderStatus }> {
   const manager = createSyncManager(gitHost('Mac-A', over))
   cleanups.push(async () => manager.setFolders([], false))
-  manager.setFolders([{ id: 'a', path: root, enabled: true }], paused)
+  manager.setFolders([{ id: 'a', path: root, enabled: true }], false)
   await manager.syncNow('a')
   return { manager, status: () => manager.folders()[0] as FolderStatus }
 }
@@ -67,12 +69,6 @@ describe('5B: failure proofs', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     }
   })
 
-  it('no git on this computer: attention/no-git', async () => {
-    const { repo: r } = await repo()
-    const { status } = await start(r.root, { sync: (root, opts) => syncFolder(root, { ...opts, host: 'Mac-A', candidates: [] }) })
-    expect(status()).toMatchObject({ state: 'attention', attention: { kind: 'no-git' } })
-  })
-
   it('a rebase in progress: attention/busy-repo and not one commit', async () => {
     const { repo: r } = await repo()
     await r.run(['checkout', '-q', '-b', 'side'])
@@ -102,29 +98,5 @@ describe('5B: failure proofs', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
 
     expect(status()).toMatchObject({ state: 'synced', alsoSyncedBy: 'Docs' })
     expect(await remoteHead(r, remote)).toBe(await r.run(['rev-parse', 'HEAD']))
-  })
-
-  it('quit: the flush lands the last change on GitHub', async () => {
-    const { repo: r, remote } = await repo()
-    const { manager } = await start(r.root)
-    await r.write('last.md', 'typed just before ⌘Q\n')
-
-    await manager.flushForQuit()
-
-    expect(await r.run(['log', '-1', '--format=%s'])).toBe('sync (Mac-A): last.md')
-    expect(await remoteHead(r, remote)).toBe(await r.run(['rev-parse', 'HEAD']))
-  })
-
-  it('paused: not one git invocation, whatever happens', async () => {
-    const { repo: r } = await repo()
-    vi.mocked(git).mockClear()
-    const { manager, status } = await start(r.root, { quietMs: 0, wakeCooldownMs: 0 }, true)
-    await r.write('ignored-while-paused.md', 'x\n')
-    manager.notifyWake()
-    await manager.syncNow(null)
-    await manager.flushForQuit()
-
-    expect(callsIn(r.root)).toEqual([])
-    expect(status()).toMatchObject({ state: 'off' })
   })
 })

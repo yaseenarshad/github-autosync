@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import { byWorst, clock, headline, lastSyncedAt, plural } from '@shared/status'
 import type { AppStatus, FolderStatus, NavTarget, SyncState } from '@shared/types'
 
 /**
@@ -8,16 +9,14 @@ import type { AppStatus, FolderStatus, NavTarget, SyncState } from '@shared/type
 
 export type TrayState = 'plain' | 'synced' | 'pending' | 'attention' | 'syncing' | 'paused'
 
-/** Worst first: what needs the user outranks what is waiting, which outranks what is moving. */
-const SEVERITY: Record<SyncState, number> = { attention: 0, pending: 1, syncing: 2, synced: 3, off: 4 }
-
-/** The one state the icon shows: paused says paused; no enabled folder shows the bare octopus; else the worst enabled folder. */
+/** The one state the icon shows: paused says paused; no folder switched on shows the bare octopus; else the worst one. */
 export function trayState(status: AppStatus): TrayState {
   if (status.paused) return 'paused'
-  const states = status.folders.filter((f) => f.enabled).map((f) => f.state)
-  if (states.length === 0) return 'plain'
-  const worst = states.reduce((a, b) => (SEVERITY[b] < SEVERITY[a] ? b : a))
-  return worst === 'off' ? 'plain' : worst
+  const [worst] = status.folders
+    .map((f) => f.state)
+    .filter((s): s is Exclude<SyncState, 'off'> => s !== 'off')
+    .sort(byWorst)
+  return worst ?? 'plain'
 }
 
 /**
@@ -30,26 +29,9 @@ export function trayVariant(platform: NodeJS.Platform, os: { appleInterfaceStyle
   return dark ? 'dark' : 'light'
 }
 
-const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
-
-function headline(status: AppStatus): string {
-  if (status.paused) return 'Paused'
-  const count = (state: SyncState) => status.folders.filter((f) => f.enabled && f.state === state).length
-  if (count('attention') > 0) return `${plural(count('attention'), 'folder needs', 'folders need')} you`
-  if (count('pending') > 0) return `${count('pending')} waiting`
-  if (count('syncing') > 0) return 'Syncing…'
-  if (status.folders.length === 0) return 'No folders yet'
-  if (!status.folders.some((f) => f.enabled)) return 'No folders syncing'
-  return 'All synced'
-}
-
-/** `3:05 PM` — the menu is a glance, not a log. */
-export const clockTime = (ms: number): string => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-
 function subline(status: AppStatus): string {
-  const last = Math.max(0, ...status.folders.map((f) => f.lastSyncedAt ?? 0))
-  const when = last === 0 ? 'Not synced yet' : `Last synced ${clockTime(last)}`
-  return `${when} · ${plural(status.folders.length, 'folder', 'folders')}`
+  const last = lastSyncedAt(status.folders)
+  return `${last === null ? 'Not synced yet' : `Last synced ${clock(last)}`} · ${plural(status.folders.length, 'folder')}`
 }
 
 function stateLabel(f: FolderStatus, paused: boolean): string {
@@ -78,7 +60,7 @@ export function trayTemplate(status: AppStatus, actions: TrayActions): MenuItemC
   const header: MenuItemConstructorOptions[] = [{ label: headline(status), enabled: false }]
   if (status.folders.length > 0) header.push({ label: subline(status), enabled: false })
   const rows = [...status.folders]
-    .sort((a, b) => SEVERITY[a.state] - SEVERITY[b.state])
+    .sort((a, b) => byWorst(a.state, b.state))
     .map((f): MenuItemConstructorOptions => ({ label: `● ${f.name} — ${stateLabel(f, status.paused)}`, click: () => actions.open({ folderId: f.id }) }))
   return [
     ...header,

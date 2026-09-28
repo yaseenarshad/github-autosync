@@ -1,7 +1,6 @@
 node_modules/
 out/
 dist/
-desktop/out/
 desktop/dist-app/
 *.dmg
 *.exe

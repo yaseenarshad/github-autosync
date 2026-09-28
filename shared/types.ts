@@ -1,5 +1,5 @@
-// The renderer ↔ main contract (YAZ-1998). Every shape the window and the menu bar render comes from here.
-// Decisions referenced as Dn live as comments on YAZ-1998.
+// The renderer ↔ main contract. Every shape the window and the menu bar render comes from here.
+// docs/CONTRACTS.md explains the status model and lists the decisions referenced as Dn.
 
 /** `off` = folder disabled or app paused (`AppStatus.paused` says which). */
 export type SyncState = 'off' | 'synced' | 'pending' | 'syncing' | 'attention'
@@ -114,7 +114,8 @@ export type FolderRejection = 'no-git' | 'not-git' | 'not-root' | 'already-added
 /** Add-folder validation (D12, D2). */
 export type FolderVerdict =
   | { ok: true; path: string; warning: OtherApp | null; offline: boolean }
-  | { ok: false; path: string; reason: FolderRejection; /** repo root when `not-root` */ root?: string }
+  | { ok: false; path: string; reason: 'not-root'; /** The top of the repo the picked folder sits inside. */ root: string }
+  | { ok: false; path: string; reason: Exclude<FolderRejection, 'not-root'> }
 
 /** Where a menu bar / notification click wants the window to go. */
 export interface NavTarget {

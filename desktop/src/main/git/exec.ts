@@ -67,12 +67,23 @@ export async function resolveGit(candidates: readonly string[] = GIT_CANDIDATES)
   return null
 }
 
-/** A git that actually runs: the macOS CLT shim exists without the tools and fails every command. */
+/** A git that ran, per candidate list. Only a hit is kept — "no git" is re-asked every time, so installing it is noticed. */
+const working = new WeakMap<readonly string[], string>()
+
+/**
+ * A git that actually runs: the macOS CLT shim exists without the tools and fails every command.
+ * Once one has run, later calls only re-`stat` it (no spawn), so an uninstall is still noticed.
+ */
 export async function findGit(candidates: readonly string[] = GIT_CANDIDATES): Promise<string | null> {
+  const known = working.get(candidates)
+  if (known !== undefined && (await stat(known).catch(() => null))?.isFile() === true) return known
+  working.delete(candidates)
   const bin = await resolveGit(candidates)
   if (bin === null) return null
   const version = await git(bin, path.parse(process.cwd()).root, ['--version']).catch(() => null)
-  return version?.code === 0 ? bin : null
+  if (version?.code !== 0) return null
+  working.set(candidates, bin)
+  return bin
 }
 
 /**

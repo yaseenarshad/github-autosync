@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
-import { formatBytes, plural, tildify, webLabel } from '../lib/format'
+import { CHECKS_EVERY, plural, SENDS_AFTER } from '@shared/status'
+import { formatBytes, tildify, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
 import { folderView, type FolderView } from '../lib/summary'
@@ -155,13 +156,13 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
         <>Waiting for the next pass.</>
       ) : (
         <>
-          Sends in <Countdown at={f.sendAt} /> — 30 seconds after you stop editing.
+          Sends in <Countdown at={f.sendAt} /> — {SENDS_AFTER}.
         </>
       )
     case 'synced':
       return (
         <>
-          <LastSynced at={f.lastSyncedAt} /> · checks GitHub every minute
+          <LastSynced at={f.lastSyncedAt} /> · checks GitHub {CHECKS_EVERY}
         </>
       )
   }
@@ -259,8 +260,7 @@ function TooBigCard({ folder: f }: { folder: FolderStatus }) {
         {f.tooBig.length === 1 ? (
           <>
             <span className="mono">{one.path}</span> is {formatBytes(one.bytes)}. GitHub rejects files over 100 MB, so it stays on{' '}
-            {platform.here}
-            only. Everything else synced.
+            {platform.here} only. Everything else synced.
           </>
         ) : (
           `GitHub rejects files over 100 MB, so these stay on ${platform.here} only. Everything else synced. They’re listed under “What’s not syncing”.`
@@ -280,7 +280,7 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
       ? 'Waiting — paused'
       : view.kind === 'attention' && f.attention?.kind !== 'conflict'
         ? 'Waiting — fix the problem above'
-        : 'Waiting — sends 30s after you stop editing'
+        : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
   const count = f.pending.length + f.tooBig.length + (ignored ? 1 : 0)
 

@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/detect.ts; changes: rewritten around AutoSync's reads (busy repo, pending, ignored, conflict copies, web URL, Docs/Draw marker, add-folder check).
 import { existsSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ConflictPair, FileChange, FileStatus, FolderVerdict, OtherApp } from '@shared/types'
 import { classifyGitFailure, findGit, git, zList } from './exec'
@@ -12,7 +12,7 @@ import { classifyGitFailure, findGit, git, zList } from './exec'
  * repo AutoSync is otherwise refusing to write to.
  */
 
-export type BusyKind = 'rebase' | 'merge' | 'detached'
+type BusyKind = 'rebase' | 'merge' | 'detached'
 
 export interface RepoState {
   remoteUrl: string | null
@@ -21,6 +21,9 @@ export interface RepoState {
   /** D16: someone (the user, another tool) is mid-operation — AutoSync must not write. */
   busy: BusyKind | null
 }
+
+/** The top of a repo: its `.git` is right here (a directory, or a linked worktree's pointer file). */
+export const isRepoRoot = (dir: string): boolean => existsSync(path.join(dir, '.git'))
 
 export async function repoState(bin: string, root: string): Promise<RepoState> {
   const remote = await git(bin, root, ['remote', 'get-url', 'origin'])
@@ -153,9 +156,10 @@ const PROBE_TIMEOUT_MS = 15_000
 export async function checkFolder(dir: string, known: readonly string[], candidates?: readonly string[]): Promise<FolderVerdict> {
   const bin = await findGit(candidates)
   if (bin === null) return { ok: false, path: dir, reason: 'no-git' }
-  if ((await stat(path.join(dir, '.git')).catch(() => null)) === null) {
+  if (!isRepoRoot(dir)) {
     const top = await git(bin, dir, ['rev-parse', '--show-toplevel']).catch(() => null)
-    return top?.code === 0 ? { ok: false, path: dir, reason: 'not-root', root: top.stdout.trim() } : { ok: false, path: dir, reason: 'not-git' }
+    // `path.resolve`: git answers `C:/x/y` on Windows; the list compares paths as this OS spells them.
+    return top?.code === 0 ? { ok: false, path: dir, reason: 'not-root', root: path.resolve(top.stdout.trim()) } : { ok: false, path: dir, reason: 'not-git' }
   }
   if (known.includes(dir)) return { ok: false, path: dir, reason: 'already-added' }
   if ((await git(bin, dir, ['remote', 'get-url', 'origin'])).code !== 0) return { ok: false, path: dir, reason: 'no-origin' }

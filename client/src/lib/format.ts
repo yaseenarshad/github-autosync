@@ -1,8 +1,3 @@
-/** "1 file" / "3 files" */
-export function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
-}
-
 /** "240 MB", "1.4 GB" */
 export function formatBytes(bytes: number): string {
   const mb = bytes / 1024 ** 2

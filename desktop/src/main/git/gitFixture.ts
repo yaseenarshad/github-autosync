@@ -44,6 +44,9 @@ export async function requireGit(): Promise<string> {
   return bin
 }
 
+/** `maxRetries`: on Windows a just-exited git can hold a handle for a moment (EBUSY/EPERM). */
+const removeDir = (dir: string): Promise<void> => rm(dir, { recursive: true, force: true, maxRetries: 5 })
+
 export async function tempDir(prefix: string): Promise<string> {
   return realpath(await mkdtemp(path.join(tmpdir(), `autosync-${prefix}-`)))
 }
@@ -64,7 +67,7 @@ function repoAt(bin: string, root: string): GitRepo {
     },
     read: (name) => readFile(path.join(root, name), 'utf8'),
     run: (args) => runIn(bin, root, args),
-    cleanup: () => rm(root, { recursive: true, force: true }),
+    cleanup: () => removeDir(root),
   }
 }
 
@@ -73,6 +76,8 @@ async function configure(repo: GitRepo, name: string): Promise<void> {
   await repo.run(['config', 'user.email', `${name.toLowerCase().replace(/\W+/g, '-')}@example.invalid`])
   // A developer with `commit.gpgsign = true` globally would otherwise fail every commit here.
   await repo.run(['config', 'commit.gpgsign', 'false'])
+  // Git for Windows ships `core.autocrlf = true`: the tests compare exact bytes, so no line-ending rewrites.
+  await repo.run(['config', 'core.autocrlf', 'false'])
 }
 
 /** A temp repo on `main` with a local identity. Zero commits until you make one. */
@@ -89,7 +94,7 @@ export async function makeBareRemote(): Promise<BareRemote> {
   const bin = await requireGit()
   const root = await tempDir('remote')
   await runIn(bin, root, ['init', '--bare', '-b', 'main', '.'])
-  return { url: root, cleanup: () => rm(root, { recursive: true, force: true }) }
+  return { url: root, cleanup: () => removeDir(root) }
 }
 
 export async function wireOrigin(repo: GitRepo, remote: BareRemote): Promise<void> {
@@ -100,7 +105,8 @@ export async function wireOrigin(repo: GitRepo, remote: BareRemote): Promise<voi
 export async function clone(remote: BareRemote, author: string): Promise<GitRepo> {
   const bin = await requireGit()
   const repo = repoAt(bin, await tempDir('clone'))
-  await runIn(bin, tmpdir(), ['clone', '-q', remote.url, repo.root])
+  // `-c` so the first checkout is already byte-exact (see `configure`).
+  await runIn(bin, tmpdir(), ['clone', '-q', '-c', 'core.autocrlf=false', remote.url, repo.root])
   await configure(repo, author)
   return repo
 }
@@ -122,15 +128,18 @@ export async function remoteHead(repo: GitRepo, remote: BareRemote): Promise<str
   return (await repo.run(['ls-remote', remote.url, 'HEAD'])).split('\t')[0] ?? ''
 }
 
-/** Every file's bytes under `root`, `.git` excluded — the lossless comparator. */
-export async function snapshot(root: string): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+/** Every file's bytes under `root`, keyed by repo-relative `/` path, `.git` excluded — the lossless comparator. */
+/** A path as a hook script's `sh` wants it: Git for Windows' sh reads `C:/x/y`, not `C:\x\y`. */
+export const shPath = (p: string): string => p.split(path.sep).join('/')
+
+export async function snapshot(root: string): Promise<Map<string, Buffer>> {
+  const out = new Map<string, Buffer>()
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.name === '.git') continue
       const p = path.join(dir, entry.name)
       if (entry.isDirectory()) await walk(p)
-      else out.set(path.relative(root, p), await readFile(p, 'utf8'))
+      else out.set(path.relative(root, p).split(path.sep).join('/'), await readFile(p))
     }
   }
   await walk(root)

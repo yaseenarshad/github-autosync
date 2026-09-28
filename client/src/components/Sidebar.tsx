@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { AppStatus, FolderStatus } from '@shared/types'
 import { parentDir, tildify } from '../lib/format'
-import { folderView, summary } from '../lib/summary'
+import { headline } from '@shared/status'
+import { folderView } from '../lib/summary'
 import { Icon } from './Icon'
 import { Ago } from './Time'
 
@@ -55,7 +56,7 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
                 </span>
                 <div>
                   <div className="name">All folders</div>
-                  <div className="sub">{summary(status)}</div>
+                  <div className="sub">{headline(status)}</div>
                 </div>
                 <span className="count">{status.folders.length}</span>
               </button>

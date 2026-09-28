@@ -1,11 +1,10 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts.
 import { stat } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Attention, ConflictPair, FileChange, OtherApp, TooBigFile } from '@shared/types'
 import { classifyGitFailure, findGit, firstMeaningfulLine, git, zList, type GitResult } from './exec'
-import { otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
+import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { resolveRebase } from './resolve'
 
 /**
@@ -58,7 +57,7 @@ export interface PassOptions {
 }
 
 /** Everything the status shows that a pass re-reads when it ends. */
-export interface Facts {
+interface Facts {
   branch: string | null
   remoteUrl: string | null
   pending: FileChange[]
@@ -88,7 +87,7 @@ export async function syncFolder(root: string, opts: PassOptions): Promise<PassR
   const bin = await findGit(opts.candidates)
   if (bin === null) return { ...CLEAN, attention: { kind: 'no-git' }, alsoSyncedBy: null, facts: null }
   // Moved, deleted, or its `.git` removed: nothing to read and nothing to write.
-  if (!existsSync(path.join(root, '.git'))) {
+  if (!isRepoRoot(root)) {
     return { ...CLEAN, attention: { kind: 'error', detail: `fatal: not a git repository: ${root}` }, alsoSyncedBy: null, facts: null }
   }
   const alsoSyncedBy = await otherApp(root)
@@ -229,25 +228,37 @@ async function stageWithinLimit(bin: string, root: string): Promise<{ failed: Gi
  * their bytes are copied back from the stash and the stash dropped — whether the rebase landed or
  * not. A copy, never a merge: it cannot conflict. Answers `rebase()`'s failure (null = landed), or
  * the git failure that stopped the park.
+ *
+ * `stash push` exits 0 even when it saved nothing (the file was reverted since it was listed), so
+ * the stash is only restored and dropped when `refs/stash` moved to a new entry — the user's own
+ * stashes are never touched.
  */
 async function parkWhileRebasing(bin: string, root: string, tooBig: readonly TooBigFile[], rebase: () => Promise<GitResult | null>): Promise<GitResult | null> {
   const tracked = tooBig.length === 0 ? [] : zList(await git(bin, root, ['ls-files', '-z', '--', ...tooBig.map((f) => `:(literal)${f.path}`)]))
   if (tracked.length === 0) return rebase()
   const specs = tracked.map((p) => `:(literal)${p}`)
+  const before = await stashTop(bin, root)
   const parked = await git(bin, root, ['stash', 'push', '-q', '-m', 'autosync: held back while rebasing', '--', ...specs])
   if (parked.code !== 0) return parked
+  const ours = await stashTop(bin, root)
+  if (ours === before) return rebase()
   try {
     return await rebase()
   } finally {
-    await git(bin, root, ['checkout', 'stash@{0}', '--', ...specs])
+    await git(bin, root, ['checkout', ours, '--', ...specs])
     await git(bin, root, ['reset', '-q', '--', ...specs])
-    await git(bin, root, ['stash', 'drop', '-q'])
+    if ((await stashTop(bin, root)) === ours) await git(bin, root, ['stash', 'drop', '-q'])
   }
+}
+
+/** The newest stash entry's sha, or '' when there is none. */
+async function stashTop(bin: string, root: string): Promise<string> {
+  return (await git(bin, root, ['rev-parse', '-q', '--verify', 'refs/stash'])).stdout.trim()
 }
 
 /** The pending list alone, for the manager's look between passes; null when git cannot read the folder. */
 export async function peekPending(root: string, candidates?: readonly string[]): Promise<FileChange[] | null> {
   const bin = await findGit(candidates)
-  if (bin === null || !existsSync(path.join(root, '.git'))) return null
+  if (bin === null || !isRepoRoot(root)) return null
   return readPending(bin, root)
 }
