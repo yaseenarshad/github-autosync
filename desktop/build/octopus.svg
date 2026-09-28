@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- GitHub AutoSync mark (D13): octopus whose outer arms curl into loops. Monochrome; tray renders it as a template image. -->
+  <path fill="#000" fill-rule="evenodd" d="M8.5 16.5C8.5 9.5 11.8 4.5 16 4.5S23.5 9.5 23.5 16.5Z M11.8 12.2a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z M16.8 12.2a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z"/>
+  <g fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round">
+    <path d="M13.6 16.5C13.4 20 12.2 22.6 12.6 26"/>
+    <path d="M18.4 16.5C18.6 20 19.8 22.6 19.4 26"/>
+    <path d="M10 16C7 18.5 3.6 18.4 3.4 14.6C3.2 11.6 5.6 10.4 7.2 11.4"/>
+    <path d="M22 16C25 18.5 28.4 18.4 28.6 14.6C28.8 11.6 26.4 10.4 24.8 11.4"/>
+  </g>
+</svg>

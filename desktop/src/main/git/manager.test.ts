@@ -1,0 +1,397 @@
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.test.ts; changes: registry folders + pause instead of vault configs, AutoSync status fields (sendAt, retryAt, pendingSince, direction), peek, flush follow-up.
+import { describe, expect, it } from 'vitest'
+import type { FileChange, FolderStatus } from '@shared/types'
+import { createSyncManager, type FolderConfig, type SyncHost, type SyncManager } from './manager'
+import type { PassResult } from './sync'
+
+/**
+ * The state machine on a FAKE host: no git, no filesystem, no window. Timings are real
+ * (`setTimeout`, tiny intervals) rather than faked — the manager interleaves timers with in-flight
+ * promises, and driving both by hand ends up testing the driver instead of the code.
+ * `guarantees.test.ts` pins serialisation, silence-when-off and the quit flush against real git.
+ */
+
+const A: FolderConfig = { id: 'a', path: '/tmp/folder-a', enabled: true }
+const NEVER = 60 * 60 * 1000
+
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const t0 = Date.now()
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error('until: condition never held')
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+function result(over: Partial<PassResult> = {}, pending: FileChange[] = []): PassResult {
+  return {
+    attention: null,
+    offline: false,
+    fetched: true,
+    level: true,
+    tooBig: [],
+    alsoSyncedBy: null,
+    facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, ignored: { patterns: [], count: 0 }, conflicts: [] },
+    ...over,
+  }
+}
+
+interface Harness {
+  manager: SyncManager
+  passes: Array<{ root: string; flush: boolean }>
+  /** Every folder status the manager reported, in order (one snapshot per `onChange`). */
+  seen: FolderStatus[]
+  watching: () => number
+  emit: () => void
+  peeks: () => number
+  status: () => FolderStatus
+}
+
+interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs'>> {
+  /** `n` is the 1-based pass count. */
+  pass?: (n: number, onDirection: (d: 'up' | 'down') => void) => Promise<PassResult>
+  peek?: () => Promise<FileChange[] | null>
+}
+
+function harness(opts: Opts = {}): Harness {
+  const passes: Array<{ root: string; flush: boolean }> = []
+  const seen: FolderStatus[] = []
+  const listeners = new Set<() => void>()
+  let peeks = 0
+  // Assigned right after the host that closes over it; `onChange` only fires once folders are set.
+  let manager: SyncManager
+  const host: SyncHost = {
+    sync: async (root, o) => {
+      passes.push({ root, flush: o.flush })
+      return opts.pass === undefined ? result() : opts.pass(passes.length, o.onDirection)
+    },
+    peek: async () => {
+      peeks += 1
+      return opts.peek === undefined ? [] : opts.peek()
+    },
+    watch: (_root, onEvent) => {
+      listeners.add(onEvent)
+      return () => listeners.delete(onEvent)
+    },
+    onChange: () => {
+      const f = manager.folders()[0]
+      if (f !== undefined) seen.push(f)
+    },
+    quietMs: opts.quietMs ?? NEVER,
+    retryMs: opts.retryMs ?? NEVER,
+    pollMs: opts.pollMs ?? NEVER,
+    wakeCooldownMs: opts.wakeCooldownMs ?? NEVER,
+    peekMs: opts.peekMs ?? NEVER,
+  }
+  manager = createSyncManager(host)
+  return {
+    manager,
+    passes,
+    seen,
+    watching: () => listeners.size,
+    emit: () => {
+      for (const l of [...listeners]) l()
+    },
+    peeks: () => peeks,
+    status: () => manager.folders()[0] as FolderStatus,
+  }
+}
+
+/** A pass the test releases by hand. */
+function gate(): { pass: (n: number) => Promise<PassResult>; release: () => void } {
+  let release: () => void = () => {}
+  return {
+    pass: () =>
+      new Promise((resolve) => {
+        release = () => resolve(result())
+      }),
+    release: () => release(),
+  }
+}
+
+describe('start', () => {
+  it('an enabled folder turns on with a pass: syncing, then synced with the pass’s facts', async () => {
+    const h = harness()
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    expect(h.passes).toEqual([{ root: A.path, flush: false }])
+    expect(h.seen.map((s) => s.state)).toContain('syncing')
+    expect(h.status()).toMatchObject({
+      id: 'a',
+      name: 'folder-a',
+      branch: 'main',
+      webUrl: 'https://github.com/yaseen/notes',
+      pending: [],
+      sendAt: null,
+      retryAt: null,
+      lastSyncedAt: expect.any(Number),
+      lastCheckedAt: expect.any(Number),
+    })
+    expect(h.watching()).toBe(1)
+  })
+
+  it('reports which way a pass is moving, and nothing once it is done', async () => {
+    const h = harness({
+      pass: async (_n, onDirection) => {
+        await sleep(1)
+        onDirection('down')
+        onDirection('up')
+        return result()
+      },
+    })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    const directions = h.seen.filter((s) => s.state === 'syncing').map((s) => s.direction)
+    expect(directions.filter((d, i) => d !== directions[i - 1])).toEqual([null, 'down', 'up'])
+    expect(h.status().direction).toBeNull()
+  })
+
+  it('classifies a host that throws as an error instead of crashing', async () => {
+    const h = harness({
+      pass: async () => {
+        throw new Error('disk went away')
+      },
+    })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'attention')
+    expect(h.status().attention).toEqual({ kind: 'error', detail: 'Error: disk went away' })
+  })
+})
+
+describe('edits (D3 debounce)', () => {
+  it('marks pending at once with a send time, and runs exactly one pass after the quiet period', async () => {
+    const h = harness({ quietMs: 40 })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+
+    const before = Date.now()
+    h.emit()
+    h.emit()
+    h.emit()
+    expect(h.status().state).toBe('pending')
+    expect(h.status().sendAt).toBeGreaterThanOrEqual(before + 40)
+    expect(h.passes).toHaveLength(1)
+
+    await until(() => h.passes.length === 2)
+    await until(() => h.status().state === 'synced')
+    await sleep(100)
+    expect(h.passes).toHaveLength(2)
+    expect(h.status().sendAt).toBeNull()
+  })
+
+  it('peeks at the pending list while the debounce waits', async () => {
+    const pending: FileChange[] = [{ status: 'M', path: 'note.md' }]
+    const h = harness({ peekMs: 5, peek: async () => pending })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+
+    h.emit()
+    await until(() => h.status().pending.length === 1)
+    expect(h.status()).toMatchObject({ state: 'pending', pending, pendingSince: expect.any(Number) })
+    expect(h.peeks()).toBe(1)
+  })
+
+  it('coalesces edits made during a running pass into one follow-up', async () => {
+    const g = gate()
+    const h = harness({ quietMs: 5, pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1)
+
+    for (let i = 0; i < 20; i += 1) h.emit()
+    await sleep(60) // the debounce fires while pass 1 is still running
+    expect(h.passes).toHaveLength(1)
+    expect(h.status().state).toBe('syncing')
+
+    g.release()
+    await until(() => h.passes.length === 2)
+    await sleep(100)
+    expect(h.passes).toHaveLength(2)
+  })
+})
+
+describe('pending bookkeeping', () => {
+  it('keeps too-big files out of pending, and pendingSince spans one episode', async () => {
+    const big = { path: 'video.mov', bytes: 100 * 1024 * 1024 }
+    const note: FileChange = { status: 'M', path: 'note.md' }
+    const video: FileChange = { status: 'A', path: 'video.mov' }
+    const answers = [result({ offline: true, level: false, tooBig: [big] }, [note, video]), result({ offline: true, level: false, tooBig: [big] }, [note, video]), result({ tooBig: [big] }, [video])]
+    const h = harness({ pass: async (n) => answers[n - 1] ?? result() })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1 && !h.status().state.startsWith('sync'))
+
+    expect(h.status()).toMatchObject({ state: 'pending', offline: true, pending: [note], tooBig: [big] })
+    const since = h.status().pendingSince
+    expect(since).toEqual(expect.any(Number))
+
+    await h.manager.syncNow('a')
+    expect(h.status().pendingSince).toBe(since) // same episode
+
+    await h.manager.syncNow('a')
+    expect(h.status()).toMatchObject({ state: 'synced', pending: [], pendingSince: null, tooBig: [big] })
+  })
+})
+
+describe('offline retry', () => {
+  it('arms one retry (with its time) after an offline pass, and settles once it succeeds', async () => {
+    const h = harness({ retryMs: 30, pass: async (n) => (n === 1 ? result({ offline: true, level: false, fetched: false }) : result()) })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().offline)
+    expect(h.status()).toMatchObject({ state: 'pending', retryAt: expect.any(Number) })
+
+    await until(() => h.status().state === 'synced')
+    expect(h.passes).toHaveLength(2)
+    expect(h.status().retryAt).toBeNull()
+    await sleep(100)
+    expect(h.passes).toHaveLength(2)
+  })
+})
+
+describe('idle poll', () => {
+  it('pulls again after `pollMs` while level, without a syncing flash', async () => {
+    const h = harness({ pollMs: 20 })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    const afterStart = h.seen.length
+    await until(() => h.passes.length >= 3)
+    expect(h.seen.slice(afterStart).map((s) => s.state).filter((s) => s !== 'synced')).toEqual([])
+    h.manager.setFolders([], false)
+  })
+
+  it('keeps polling with conflict copies around, and stops on any other attention or offline', async () => {
+    const conflict = result({ attention: { kind: 'conflict', conflicts: [{ original: 'a.md', copy: 'a (conflict Mac-B, 2026-09-27).md' }] } })
+    const h1 = harness({ pollMs: 10, pass: async () => conflict })
+    h1.manager.setFolders([A], false)
+    await until(() => h1.passes.length >= 3)
+    expect(h1.status().state).toBe('attention')
+    h1.manager.setFolders([], false)
+
+    for (const stop of [result({ attention: { kind: 'auth', detail: 'fatal: Authentication failed' }, level: false }), result({ offline: true, level: false })]) {
+      const h = harness({ pollMs: 10, pass: async () => stop })
+      h.manager.setFolders([A], false)
+      await until(() => h.passes.length === 1 && h.status().state !== 'syncing')
+      await sleep(60)
+      expect(h.passes).toHaveLength(1)
+      h.manager.setFolders([], false)
+    }
+  })
+
+  it('stands down while edits settle; the edit’s pass re-arms it', async () => {
+    const h = harness({ pollMs: 40, quietMs: 80 })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1 && h.status().state === 'synced')
+    h.emit()
+    await sleep(60) // the poll would have fired by now
+    expect(h.passes).toHaveLength(1)
+    await until(() => h.passes.length === 2)
+    await until(() => h.passes.length === 3)
+    h.manager.setFolders([], false)
+  })
+})
+
+describe('wake (D3)', () => {
+  it('pulls on wake once the cooldown has passed, and not inside it', async () => {
+    const h = harness({ wakeCooldownMs: NEVER })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.manager.notifyWake()
+    await sleep(30)
+    expect(h.passes).toHaveLength(1)
+
+    const h2 = harness({ wakeCooldownMs: 0 })
+    h2.manager.setFolders([A], false)
+    await until(() => h2.status().state === 'synced')
+    h2.manager.notifyWake()
+    await until(() => h2.passes.length === 2)
+  })
+})
+
+describe('off means off', () => {
+  it('a disabled folder is watched by nothing and synced by nothing, and turning it on pulls', async () => {
+    const h = harness({ quietMs: 0, wakeCooldownMs: 0 })
+    h.manager.setFolders([{ ...A, enabled: false }], false)
+    h.emit()
+    h.manager.notifyWake()
+    await h.manager.syncNow(null)
+    await h.manager.flushForQuit()
+    await sleep(30)
+    expect(h.passes).toEqual([])
+    expect(h.watching()).toBe(0)
+    expect(h.status()).toMatchObject({ state: 'off', enabled: false })
+
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    expect(h.passes).toHaveLength(1)
+  })
+
+  it('pausing stops every folder mid-debounce; resuming pulls', async () => {
+    const h = harness({ quietMs: 30 })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    h.manager.setFolders([A], true)
+    expect(h.status()).toMatchObject({ state: 'off', enabled: true, sendAt: null })
+    expect(h.watching()).toBe(0)
+    await sleep(80)
+    expect(h.passes).toHaveLength(1)
+
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 2)
+  })
+
+  it('a folder removed mid-pass is forgotten: its result is dropped and nothing follows', async () => {
+    const g = gate()
+    const h = harness({ quietMs: 5, pass: g.pass })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1)
+    h.emit()
+    h.manager.setFolders([], false)
+    g.release()
+    await sleep(60)
+    expect(h.manager.folders()).toEqual([])
+    expect(h.passes).toHaveLength(1)
+  })
+})
+
+describe('syncNow', () => {
+  it('resolves once the pass is done; null means every active folder', async () => {
+    const B: FolderConfig = { id: 'b', path: '/tmp/folder-b', enabled: true }
+    const C: FolderConfig = { id: 'c', path: '/tmp/folder-c', enabled: false }
+    const h = harness()
+    h.manager.setFolders([A, B, C], false)
+    await until(() => h.passes.length === 2 && h.manager.folders().every((f) => f.state !== 'syncing'))
+
+    await h.manager.syncNow(null)
+    expect(h.passes.map((p) => p.root).slice(2).sort()).toEqual([A.path, B.path])
+    expect(h.manager.folders().map((f) => f.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('flushForQuit', () => {
+  it('cancels a waiting debounce and lands one flush pass', async () => {
+    const h = harness()
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+
+    await h.manager.flushForQuit()
+
+    expect(h.passes).toEqual([
+      { root: A.path, flush: false },
+      { root: A.path, flush: true },
+    ])
+    expect(h.watching()).toBe(0)
+  })
+
+  it('joins a pass already running, and its follow-up is the flush', async () => {
+    const g = gate()
+    const h = harness({ pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1)
+    void h.manager.syncNow('a') // a normal follow-up is queued…
+    const flushed = h.manager.flushForQuit() // …and the quit upgrades it
+    g.release()
+    await flushed
+    expect(h.passes.map((p) => p.flush)).toEqual([false, true])
+  })
+})
