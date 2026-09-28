@@ -1,6 +1,6 @@
 import type { AppStatus } from '@shared/types'
-import { plural } from '../lib/format'
-import { folderView, overall, RANK } from '../lib/summary'
+import { byWorst, plural } from '@shared/status'
+import { folderView, overall } from '../lib/summary'
 import { Icon } from './Icon'
 import { Ago } from './Time'
 
@@ -8,7 +8,7 @@ export function Overview({ status, onSelect }: { status: AppStatus; onSelect: (i
   const o = overall(status)
   const rows = status.folders
     .map((f) => ({ f, v: folderView(f, status) }))
-    .sort((a, b) => RANK[b.v.cls] - RANK[a.v.cls] || (b.f.lastSyncedAt ?? 0) - (a.f.lastSyncedAt ?? 0))
+    .sort((a, b) => byWorst(a.v.cls, b.v.cls) || (b.f.lastSyncedAt ?? 0) - (a.f.lastSyncedAt ?? 0))
 
   return (
     <>

@@ -84,7 +84,7 @@ function Verdict({ verdict: v, home, onUseRoot }: { verdict: FolderVerdict; home
     case 'not-git':
       return <Box tone="bad">Not a git folder. AutoSync only syncs folders that are already git repositories.</Box>
     case 'not-root': {
-      const root = v.root!
+      const { root } = v
       return (
         <Box tone="bad">
           This is inside a git folder, not the top of one. Pick {tildify(root, home)} instead.
@@ -106,7 +106,7 @@ function Verdict({ verdict: v, home, onUseRoot }: { verdict: FolderVerdict; home
     case 'auth':
       return (
         <Box tone="bad" prompt={loginPrompt(v.path)}>
-          GitHub login isn't set up on this computer, so AutoSync can't reach this repo. It's a one-time fix: run “gh auth login” in
+          GitHub login isn't set up on this computer, so AutoSync can't reach this repo. It's a one-time fix: run “gh auth login” in{' '}
           {platform.terminal}, then try again.
         </Box>
       )

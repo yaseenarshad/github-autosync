@@ -20,6 +20,7 @@ vi.mock('./exec', async (actual) => {
  *   1. a conflict is LOSSLESS — both computers' bytes survive (kept both), and a pass that has to
  *      stop anyway leaves the working tree as it was, a save made while it was stopped included
  *   2. passes on one folder never interleave, and a trigger burst coalesces to ONE follow-up
+ *      (pinned on a fake host in manager.test.ts: the serialisation is the manager's, not git's)
  *   3. a disabled folder, or any folder while paused, produces ZERO git activity
  *   4. a computer with no git classifies `no-git` instead of throwing
  *   5. quit flush lands pending changes on the remote before it resolves
@@ -63,8 +64,8 @@ describe('guarantee 1: a conflict is lossless', { timeout: REAL_GIT_TIMEOUT_MS }
     const copy = res.facts?.conflicts[0]?.copy ?? ''
     expect(copy).toMatch(/^note \(conflict Mac-A, \d{4}-\d{2}-\d{2}\)\.md$/)
     const files = await snapshot(a.root)
-    expect(files.get('note.md')).toBe('line one CHANGED ON B\nline two\n')
-    expect(files.get(copy)).toBe('line one CHANGED ON A\nline two\n')
+    expect(files.get('note.md')?.toString()).toBe('line one CHANGED ON B\nline two\n')
+    expect(files.get(copy)?.toString()).toBe('line one CHANGED ON A\nline two\n')
     expect(await a.run(['status'])).not.toMatch(/rebase in progress/i)
   })
 
@@ -84,38 +85,8 @@ describe('guarantee 1: a conflict is lossless', { timeout: REAL_GIT_TIMEOUT_MS }
     const res = await syncFolder(a.root, { host: 'Mac-A' })
 
     expect(res.attention).toMatchObject({ kind: 'error', detail: expect.stringMatching(/could not apply/) })
-    expect(await snapshot(a.root)).toEqual(new Map([...before, ['other.md', 'saved mid-rebase\n']]))
+    expect(await snapshot(a.root)).toEqual(new Map([...before, ['other.md', Buffer.from('saved mid-rebase\n')]]))
     expect(await a.run(['status'])).not.toMatch(/rebase in progress/i)
-  })
-})
-
-describe('guarantee 2: passes serialise and triggers coalesce', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
-  it('a burst of syncNow during a running pass yields exactly one follow-up pass', async () => {
-    const log: string[] = []
-    let release = null as (() => void) | null
-    let active = 0
-    const manager = createSyncManager({
-      ...gitHost('Mac-A'),
-      sync: async (root) => {
-        active += 1
-        expect(active).toBe(1) // the serialisation guarantee itself
-        log.push(root)
-        await new Promise<void>((resolve) => {
-          release = resolve
-        })
-        active -= 1
-        return { attention: null, offline: false, fetched: true, level: true, tooBig: [], alsoSyncedBy: null, facts: null }
-      },
-    })
-    manager.setFolders([{ id: 'v', path: '/tmp/vault', enabled: true }], false)
-    await until(() => log.length === 1) // the start pass
-    const settled = Promise.all([manager.syncNow('v'), manager.syncNow('v'), manager.syncNow(null)])
-    release?.()
-    await until(() => log.length === 2)
-    release?.()
-    await settled
-    await new Promise((r) => setTimeout(r, 50))
-    expect(log).toEqual(['/tmp/vault', '/tmp/vault'])
   })
 })
 

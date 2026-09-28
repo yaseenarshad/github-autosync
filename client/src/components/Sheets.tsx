@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, FolderVerdict, ThemeChoice } from '@shared/types'
+import { CHECKS_EVERY, SENDS_AFTER } from '@shared/status'
 import { AddFolderSheet } from './AddFolderSheet'
 import { platform } from '../lib/platform'
 
@@ -123,7 +124,7 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
       >
         <span className="mono">{status.hostname}</span>
       </Setting>
-      <Setting title="When it syncs" detail="Sends 30s after you stop editing · checks GitHub every minute · on wake · when you quit." />
+      <Setting title="When it syncs" detail={`Sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit.`} />
       <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
     </Sheet>
   )

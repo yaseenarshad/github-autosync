@@ -5,7 +5,8 @@ import './app.css'
 
 async function start() {
   // Plain Vite in a browser has no preload: fall back to a seeded in-memory API so the UI can be viewed.
-  if (!window.autosync) window.autosync = (await import('./dev/fakeApi')).createFakeApi()
+  // Dev only, so a production build drops the fake (and its demo data) entirely.
+  if (import.meta.env.DEV && !window.autosync) window.autosync = (await import('./dev/fakeApi')).createFakeApi()
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

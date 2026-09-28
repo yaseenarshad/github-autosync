@@ -6,7 +6,7 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
-import { clone, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
+import { clone, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
 import { commitMessage, hostName, syncFolder, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS, type PassOptions } from './sync'
 
 // Real git throughout; the spy only records what each call was given.
@@ -164,7 +164,8 @@ describe('syncFolder', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     await b.run(['commit', '-qm', 'sync (Mac-B): b.md'])
     // The race, made deterministic: the first time A pushes, B's push lands first.
     const hook = path.join(repo.root, '.git', 'hooks', 'pre-push')
-    await writeFile(hook, `#!/bin/sh\n[ -f "${hook}.done" ] && exit 0\ntouch "${hook}.done"\ngit -C "${b.root}" push -q\n`, { mode: 0o755 })
+    const done = `${shPath(hook)}.done`
+    await writeFile(hook, `#!/bin/sh\n[ -f "${done}" ] && exit 0\ntouch "${done}"\ngit -C "${shPath(b.root)}" push -q\n`, { mode: 0o755 })
     await repo.write('a.md', 'a\n')
 
     expect(await pass(repo)).toMatchObject({ attention: null, level: true })
@@ -409,9 +410,17 @@ describe('files too big for GitHub (D11)', { timeout: REAL_GIT_TIMEOUT_MS }, () 
     expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
   })
 
-  it('a held-back TRACKED file never blocks the rebase, and its bytes stay exactly as they were', async () => {
+  /** A stash the user made by hand, before AutoSync ever ran: its sha. */
+  async function userStash(repo: GitRepo): Promise<string> {
+    await repo.write('note.md', 'my own work in progress\n')
+    await repo.run(['stash', 'push', '-q', '-m', 'my wip'])
+    return repo.run(['rev-parse', 'refs/stash'])
+  }
+
+  it('a held-back TRACKED file never blocks the rebase, its bytes stay exactly as they were, and the user\u2019s own stash is untouched', async () => {
     const { repo, remote } = await pushedRepo()
     await pushFrom(await otherComputer(remote), { 'note.md': 'line one\nfrom B\n', 'other.md': '# other\n' })
+    const mine = await userStash(repo)
     const big = path.join(repo.root, 'note.md')
     await writeFile(big, 'our head\n')
     await truncate(big, TOO_BIG_BYTES + 1)
@@ -424,7 +433,28 @@ describe('files too big for GitHub (D11)', { timeout: REAL_GIT_TIMEOUT_MS }, () 
     expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): small.md\nsync (Mac-B)\nbase')
     expect(await sha1(big)).toBe(before)
     expect(await repo.run(['show', 'HEAD:note.md'])).toBe('line one\nfrom B')
-    expect(await repo.run(['stash', 'list'])).toBe('')
+    expect(await repo.run(['stash', 'list', '--format=%H'])).toBe(mine)
+  })
+
+  it('never drops the user\u2019s stash when the held-back file was reverted before the park (the park saves nothing)', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# other\n' })
+    const mine = await userStash(repo)
+    await oversize(repo, 'note.md', TOO_BIG_BYTES + 1)
+    const real = vi.mocked(git).getMockImplementation() as typeof git
+    // The user undoes the big edit in the moment between the size check and the park.
+    vi.mocked(git).mockImplementation(async (b, root, args, opts) => {
+      if (args[0] === 'stash' && args[1] === 'push') await real(b, root, ['checkout', '--', 'note.md'])
+      return real(b, root, args, opts)
+    })
+    try {
+      expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+    } finally {
+      vi.mocked(git).mockImplementation(real)
+    }
+    expect(await repo.run(['stash', 'list', '--format=%H'])).toBe(mine)
+    expect(await repo.read('note.md')).toBe('line one\n')
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-B)\nbase')
   })
 
   it('clears once the file is gone', async () => {

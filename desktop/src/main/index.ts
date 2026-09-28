@@ -161,11 +161,11 @@ app.on('second-instance', () => {
 
 void app.whenReady().then(() => {
   if (!primary) return
-  registerIpc({ registry, manager, hostname: HOST, status, apply, navigate })
+  registerIpc({ registry, manager, status, apply, navigate })
   Menu.setApplicationMenu(appMenu())
   tray = createTray(join(app.getAppPath(), 'resources', 'tray'), {
     open: navigate,
-    openWindow: () => void showWindow(),
+    openWindow: showWindow,
     syncAll: () => void manager.syncNow(null),
     quit: () => app.quit(),
   })
@@ -174,7 +174,7 @@ void app.whenReady().then(() => {
   powerMonitor.on('resume', () => manager.notifyWake())
   powerMonitor.on('unlock-screen', () => manager.notifyWake())
   setInterval(refresh, NOTICE_TICK_MS).unref()
-  app.on('activate', () => void showWindow())
+  app.on('activate', showWindow)
   // D4: start in the menu bar; only a first run (nothing to sync yet) opens the window.
   if (registry.get().folders.length === 0) showWindow()
   else {

@@ -1,5 +1,7 @@
-import type { ActivityEntry, AppStatus, FolderStatus } from '@shared/types'
+// Test-only builders for the contract shapes, shared by the client and desktop suites.
+import type { ActivityEntry, AppStatus, FolderStatus } from './types'
 
+/** A synced, enabled GitHub folder; tests override what they are about. */
 export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
   return {
     id: 'notes',

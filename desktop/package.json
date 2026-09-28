@@ -12,12 +12,11 @@
     "pack": "electron-builder",
     "icons": "node scripts/render-icons.mjs"
   },
-  "dependencies": {
-    "chokidar": "^4.0.3"
-  },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^22.0.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "chokidar": "^4.0.3",
     "electron": "43.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0"

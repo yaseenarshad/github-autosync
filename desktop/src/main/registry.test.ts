@@ -55,6 +55,21 @@ describe('registry (D5)', () => {
     },
   )
 
+  it('refuses to write a change the next launch would reject, keeping the file and the config as they were', async () => {
+    const d = await dir()
+    const registry = createRegistry(d)
+    registry.update((c) => ({ ...c, folders: [newFolder('/Users/me/notes')] }))
+    const saved = readFileSync(path.join(d, 'config.json'), 'utf8')
+    const before = registry.get()
+
+    expect(() => registry.update((c) => ({ ...c, theme: 'sepia' as never }))).toThrow(/malformed/)
+    expect(() => registry.update((c) => ({ ...c, folders: [{ id: 'x', path: '/x', enabled: 'yes' as never }] }))).toThrow(/malformed/)
+
+    expect(registry.get()).toBe(before)
+    expect(readFileSync(path.join(d, 'config.json'), 'utf8')).toBe(saved)
+    expect(createRegistry(d).get()).toEqual(before)
+  })
+
   it('gives every folder a stable random id', () => {
     const a = newFolder('/a')
     const b = newFolder('/a')

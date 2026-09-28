@@ -85,7 +85,7 @@ async function keepBoth(bin: string, root: string, rel: string, copies: Map<stri
 }
 
 /** `a/Note.md` → `a/Note (conflict Mac-A, 2026-09-27).md`, numbered past anything already there. */
-export function freeCopyName(root: string, rel: string, host: string, now: Date): string {
+function freeCopyName(root: string, rel: string, host: string, now: Date): string {
   const dir = path.posix.dirname(rel)
   const ext = path.posix.extname(rel)
   const stem = path.posix.basename(rel, ext)

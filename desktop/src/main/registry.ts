@@ -9,7 +9,7 @@ import type { FolderConfig } from './git/manager'
  * owns; nothing is ever written into the user's folders.
  *
  * Written whole on every change, via temp file + rename, so a crash mid-write leaves the old file
- * rather than half a new one. A file that will not parse is moved aside to `config.json.bak`
+ * rather than half a new one, and only after the change passes the same check a load does. A file that will not parse is moved aside to `config.json.bak`
  * (kept for a human to look at) and the app starts from defaults instead of refusing to start.
  */
 
@@ -24,7 +24,7 @@ export interface Config {
 
 export interface Registry {
   get(): Config
-  /** Applies `change` to a copy and persists it; answers the new config. */
+  /** Applies `change` to a copy and persists it; answers the new config. Throws, writing nothing, if the result is malformed. */
   update(change: (config: Config) => Config): Config
 }
 
@@ -61,7 +61,9 @@ export function createRegistry(dir: string): Registry {
   return {
     get: () => config,
     update(change) {
-      const next = change(structuredClone(config))
+      // Held to the same rules as a load: a value the next launch would reject never reaches the disk.
+      const next = parse(JSON.stringify(change(structuredClone(config))))
+      if (next === null) throw new Error('Refusing to save a malformed config')
       mkdirSync(dir, { recursive: true })
       const tmp = `${file}.tmp`
       writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`)

@@ -211,6 +211,26 @@ describe('edits (D3 debounce)', () => {
     expect(h.seen.filter((s) => s.state === 'pending')).not.toHaveLength(0)
   })
 
+  it('survives a peek that throws (the folder vanished mid-read): nothing changes, and the next edit still counts', async () => {
+    let vanished = true
+    const h = harness({
+      peek: async () => {
+        if (vanished) throw new Error('ENOENT: no such file or directory')
+        return EDIT
+      },
+    })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    await until(() => h.peeks() === 1)
+    await sleep(20)
+    expect(h.status()).toMatchObject({ state: 'synced', pending: [], sendAt: null })
+
+    vanished = false
+    h.emit()
+    await until(() => h.status().state === 'pending')
+  })
+
   it("ignores AutoSync's own writes: events during a pass, and just after it, never mark pending or run a pass", async () => {
     const g = gate()
     const h = harness({ quietMs: 5, ownWritesMs: 50, pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
