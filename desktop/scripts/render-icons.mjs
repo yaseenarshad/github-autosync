@@ -1,40 +1,40 @@
-// Renders the committed PNGs from the two SVG sources: the menu bar octopus in every state
-// (resources/tray) and the 1024 px app icon (build/icon.png). Run after editing either SVG:
+// Renders the committed PNGs: the menu bar status dot in every state (resources/tray) and the
+// 1024 px octopus app icon (build/icon.png, from build/icon.svg). Run after editing either:
 //   npm run icons -w desktop
 import { Resvg } from '@resvg/resvg-js'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const desktop = fileURLToPath(new URL('..', import.meta.url))
 const png = (svg, width) => new Resvg(svg, { fitTo: { mode: 'width', value: width } }).render().asPng()
 
-// The octopus's own shapes, recoloured: black body for a light menu bar, white for a dark one.
-const octopus = readFileSync(`${desktop}build/octopus.svg`, 'utf8')
-  .replace(/^[\s\S]*?<svg[^>]*>/, '')
-  .replace(/<\/svg>\s*$/, '')
-  .replace(/<!--[\s\S]*?-->/g, '')
-
-const DOT = { synced: '#3fb950', pending: '#d29922', attention: '#f85149', syncing: '#58a6ff' }
-
-/** 32-unit canvas: the badge sits bottom-right (r 7 = 3.5 px at 16 px), cut out of the octopus so it reads at menu bar size. */
-function traySvg(state, body) {
-  const shapes = octopus.replaceAll('#000', body)
-  if (state === 'plain') return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${shapes}</svg>`
-  const badge =
-    state === 'paused'
-      ? `<rect x="19.5" y="18" width="4" height="13" rx="1" fill="${body}"/><rect x="26.5" y="18" width="4" height="13" rx="1" fill="${body}"/>`
-      : `<circle cx="25" cy="25" r="7" fill="${DOT[state]}"/>`
-  const cut = `<mask id="cut"><rect width="32" height="32" fill="#fff"/><circle cx="25" cy="25" r="9.5" fill="#000"/></mask>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs>${cut}</defs><g mask="url(#cut)">${shapes}</g>${badge}</svg>`
+/**
+ * D20: one big dot, 16 pt across in an 18 pt image (1 pt clear on each side), drawn on a 36-unit
+ * canvas = the @2x pixels. Its colours read on light and dark menu bars alike, so there is one set,
+ * not template images; the white glyph says the state without relying on colour.
+ */
+const WHITE = '#fff'
+const dot = (fill) => `<circle cx="18" cy="18" r="16" fill="${fill}"/>`
+const TRAY = {
+  synced: dot('#2ea043'),
+  pending: dot('#d29922') + [11, 18, 25].map((x) => `<circle cx="${x}" cy="18" r="2.6" fill="${WHITE}"/>`).join(''),
+  syncing:
+    dot('#2f81f7') +
+    `<path d="M18 10.5A7.5 7.5 0 1 1 10.5 18" fill="none" stroke="${WHITE}" stroke-width="3" stroke-linecap="round"/>` +
+    `<path d="M10.5 11.5L15 17.5H6Z" fill="${WHITE}"/>`,
+  attention: dot('#da3633') + `<rect x="16.25" y="8" width="3.5" height="13" rx="1.75" fill="${WHITE}"/><circle cx="18" cy="26" r="2.1" fill="${WHITE}"/>`,
+  paused: dot('#da3633') + `<rect x="12" y="10.5" width="4" height="15" rx="1" fill="${WHITE}"/><rect x="20" y="10.5" width="4" height="15" rx="1" fill="${WHITE}"/>`,
+  // No folders: a hollow grey ring, the same size as the dot.
+  plain: `<circle cx="18" cy="18" r="14.5" fill="none" stroke="#8b949e" stroke-width="3"/>`,
 }
 
-mkdirSync(`${desktop}resources/tray`, { recursive: true })
-for (const state of ['plain', 'synced', 'pending', 'attention', 'syncing', 'paused']) {
-  for (const [variant, body] of [['light', '#000'], ['dark', '#fff']]) {
-    const svg = traySvg(state, body)
-    writeFileSync(`${desktop}resources/tray/tray-${state}-${variant}.png`, png(svg, 16))
-    writeFileSync(`${desktop}resources/tray/tray-${state}-${variant}@2x.png`, png(svg, 32))
-  }
+const dir = `${desktop}resources/tray`
+rmSync(dir, { recursive: true, force: true })
+mkdirSync(dir, { recursive: true })
+for (const [state, shapes] of Object.entries(TRAY)) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">${shapes}</svg>`
+  writeFileSync(`${dir}/tray-${state}.png`, png(svg, 18))
+  writeFileSync(`${dir}/tray-${state}@2x.png`, png(svg, 36))
 }
 writeFileSync(`${desktop}build/icon.png`, png(readFileSync(`${desktop}build/icon.svg`, 'utf8'), 1024))
 console.log('rendered resources/tray/*.png and build/icon.png')
