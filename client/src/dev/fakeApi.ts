@@ -85,6 +85,7 @@ export function createFakeApi(): AutoSyncApi {
     paused: false,
     gitMissing: false,
     launchAtLogin: true,
+    theme: 'system',
     folders: [
       folder('skills-global-yaseen', 'Documents/GitHub', {
         state: 'attention',
@@ -194,6 +195,8 @@ export function createFakeApi(): AutoSyncApi {
       return Promise.resolve({ entries: all.slice(cursor, next), cursor: next < all.length ? next : null })
     },
     setLaunchAtLogin: (on) => set({ ...status, launchAtLogin: on }),
+    // The CSS follows prefers-color-scheme, which only Electron's themeSource can move: the browser preview just records it.
+    setTheme: (theme) => set({ ...status, theme }),
     showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
     // Fake ids are the folder names.
     setAlias: (id, alias) => patch(id, { alias, name: alias ?? id }),

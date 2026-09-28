@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, powerMonitor, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, Notification, powerMonitor, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import type { AppStatus, NavTarget } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
@@ -87,7 +87,7 @@ function navigate(target: NavTarget): void {
 function status(): AppStatus {
   const config = registry.get()
   const folders = manager.folders()
-  return { folders, paused: config.paused, gitMissing: gitMissing || folders.some((f) => f.attention?.kind === 'no-git'), hostname: HOST, launchAtLogin: config.launchAtLogin }
+  return { folders, paused: config.paused, gitMissing: gitMissing || folders.some((f) => f.attention?.kind === 'no-git'), hostname: HOST, launchAtLogin: config.launchAtLogin, theme: config.theme }
 }
 
 async function probeGit(): Promise<void> {
@@ -123,6 +123,8 @@ const refresh = throttle(() => {
 function apply(): void {
   const config = registry.get()
   manager.setFolders(config.folders, config.paused)
+  // D19: the renderer's CSS follows `prefers-color-scheme`, which follows this — nothing else to tell it.
+  nativeTheme.themeSource = config.theme
   // A dev build would register the Electron binary itself as a login item.
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: config.launchAtLogin })
 }

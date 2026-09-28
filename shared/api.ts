@@ -1,4 +1,4 @@
-import type { ActivityPage, AppStatus, FolderVerdict, NavTarget } from './types'
+import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, ThemeChoice } from './types'
 
 /**
  * Everything the renderer can ask of the main process, exposed by the preload as `window.autosync`.
@@ -24,6 +24,7 @@ export interface AutoSyncApi {
   /** Newest first; pass the returned cursor to page back. */
   activity(id: string, cursor?: number): Promise<ActivityPage>
   setLaunchAtLogin(on: boolean): Promise<AppStatus>
+  setTheme(theme: ThemeChoice): Promise<AppStatus>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */

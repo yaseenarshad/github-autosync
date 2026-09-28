@@ -88,6 +88,7 @@ export function registerIpc(deps: IpcDeps): void {
     syncNow: (id) => manager.syncNow(id),
     activity: async (id, cursor) => readActivity(folderPath(id), deps.hostname, cursor),
     setLaunchAtLogin: async (on) => change((c) => ({ ...c, launchAtLogin: on })),
+    setTheme: async (theme) => change((c) => ({ ...c, theme })),
     showInFinder: async (id) => {
       const failure = await shell.openPath(folderPath(id))
       if (failure !== '') throw new Error(failure)

@@ -20,6 +20,16 @@ export function trayState(status: AppStatus): TrayState {
   return worst === 'off' ? 'plain' : worst
 }
 
+/**
+ * Which icon set suits the MENU BAR / taskbar — the OS's own appearance, never the app's theme
+ * (D19): forcing the window light must not paint a black octopus on a dark menu bar. macOS: the
+ * system-wide `AppleInterfaceStyle` default. Windows: whether the taskbar is dark.
+ */
+export function trayVariant(platform: NodeJS.Platform, os: { appleInterfaceStyle: string; systemUiDark: boolean }): 'dark' | 'light' {
+  const dark = platform === 'darwin' ? os.appleInterfaceStyle === 'Dark' : os.systemUiDark
+  return dark ? 'dark' : 'light'
+}
+
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 function headline(status: AppStatus): string {
