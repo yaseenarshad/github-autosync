@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "pack": "electron-builder"
+    "pack": "electron-builder",
+    "icons": "node scripts/render-icons.mjs"
   },
   "dependencies": {
     "chokidar": "^4.0.3"
@@ -24,11 +25,13 @@
   "build": {
     "appId": "com.yaseenarshad.githubautosync",
     "productName": "GitHub AutoSync",
+    "icon": "build/icon.png",
     "directories": {
       "output": "dist-app"
     },
     "files": [
-      "out/**"
+      "out/**",
+      "resources/**"
     ],
     "afterPack": "build/adhocSign.cjs",
     "mac": {
