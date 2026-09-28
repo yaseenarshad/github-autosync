@@ -7,5 +7,5 @@
     "baseUrl": "..",
     "paths": { "@shared/*": ["shared/*"] }
   },
-  "include": ["src", "../shared", "vitest.config.ts"]
+  "include": ["src", "../shared", "vitest.config.ts", "vite.config.ts"]
 }
