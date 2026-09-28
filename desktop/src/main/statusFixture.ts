@@ -6,6 +6,7 @@ export function folder(over: Partial<FolderStatus> = {}): FolderStatus {
     id: 'a',
     path: '/Users/me/notes',
     name: 'notes',
+    alias: null,
     enabled: true,
     state: 'synced',
     direction: null,

@@ -41,6 +41,8 @@ export interface FolderConfig {
   id: string
   path: string
   enabled: boolean
+  /** D18 nickname, shown instead of the folder's own name; absent when there is none. */
+  alias?: string
 }
 
 type PassMode = 'quiet' | 'normal' | 'flush'
@@ -175,7 +177,8 @@ function toStatus(e: Entry): FolderStatus {
   return {
     id: e.cfg.id,
     path: e.cfg.path,
-    name: path.basename(e.cfg.path),
+    name: e.cfg.alias ?? path.basename(e.cfg.path),
+    alias: e.cfg.alias ?? null,
     enabled: e.cfg.enabled,
     state: stateOf(e),
     direction: e.syncing ? e.direction : null,

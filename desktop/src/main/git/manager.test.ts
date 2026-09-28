@@ -135,6 +135,14 @@ describe('start', () => {
     expect(h.watching()).toBe(1)
   })
 
+  it('shows the nickname as the name when there is one (D18)', () => {
+    const h = harness()
+    h.manager.setFolders([{ ...A, enabled: false, alias: 'Work notes' }], false)
+    expect(h.status()).toMatchObject({ name: 'Work notes', alias: 'Work notes' })
+    h.manager.setFolders([{ ...A, enabled: false }], false)
+    expect(h.status()).toMatchObject({ name: 'folder-a', alias: null })
+  })
+
   it('reports which way a pass is moving, and nothing once it is done', async () => {
     const h = harness({
       pass: async (_n, onDirection) => {

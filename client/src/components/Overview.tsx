@@ -31,8 +31,17 @@ export function Overview({ status, onSelect }: { status: AppStatus; onSelect: (i
           Folders <span className="hint">Needs-you first</span>
         </h2>
         <div className="tbl">
+          {/* Right-click doesn't select here (unlike the sidebar): selecting would leave the overview under the open menu. */}
           {rows.map(({ f, v }) => (
-            <button key={f.id} className="plain tr click ov-row" onClick={() => onSelect(f.id)}>
+            <button
+              key={f.id}
+              className="plain tr click ov-row"
+              onClick={() => onSelect(f.id)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                void window.autosync.showFolderMenu(f.id)
+              }}
+            >
               <span className={`dot ${v.cls}`} />
               <div className="grow">
                 <div className="nm">

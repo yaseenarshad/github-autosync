@@ -29,7 +29,7 @@ const defaults = (): Config => ({ version: 1, folders: [], launchAtLogin: true, 
 
 const isFolder = (v: unknown): v is FolderConfig => {
   const f = v as Partial<FolderConfig> | null
-  return typeof f?.id === 'string' && typeof f.path === 'string' && typeof f.enabled === 'boolean'
+  return typeof f?.id === 'string' && typeof f.path === 'string' && typeof f.enabled === 'boolean' && (f.alias === undefined || typeof f.alias === 'string')
 }
 
 function parse(raw: string): Config | null {
@@ -67,3 +67,10 @@ export function createRegistry(dir: string): Registry {
 
 /** A folder as it enters the list: a stable random id, syncing from the start. */
 export const newFolder = (folderPath: string): FolderConfig => ({ id: randomUUID(), path: folderPath, enabled: true })
+
+/** D18: a nickname is trimmed, and a blank one is no nickname — the key is dropped rather than stored empty. */
+export function withAlias(folder: FolderConfig, alias: string | null): FolderConfig {
+  const { alias: _old, ...rest } = folder
+  const trimmed = alias?.trim() ?? ''
+  return trimmed === '' ? rest : { ...rest, alias: trimmed }
+}

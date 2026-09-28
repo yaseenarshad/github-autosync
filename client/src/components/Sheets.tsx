@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from 'react'
-import type { AppStatus, FolderVerdict } from '@shared/types'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { AppStatus, FolderStatus, FolderVerdict } from '@shared/types'
 import { AddFolderSheet } from './AddFolderSheet'
 import { platform } from '../lib/platform'
 
@@ -11,6 +11,7 @@ export type SheetState =
   | { kind: 'folder-off'; id: string }
   | { kind: 'folder-on'; id: string }
   | { kind: 'remove'; id: string }
+  | { kind: 'rename'; id: string }
 
 interface SheetProps {
   title: string
@@ -222,5 +223,48 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           GitHub. Your other computers keep syncing it until you remove it there too.
         </ConfirmSheet>
       )
+    case 'rename':
+      return <RenameSheet folder={folder} onClose={onClose} />
   }
+}
+
+/** D18: a nickname shown in AutoSync only. */
+function RenameSheet({ folder, onClose }: { folder: FolderStatus; onClose: () => void }) {
+  const [value, setValue] = useState(folder.alias ?? folder.name)
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => input.current?.select(), [])
+
+  async function save() {
+    await window.autosync.setAlias(folder.id, value.trim() || null)
+    onClose()
+  }
+
+  return (
+    <Sheet
+      title="Rename in AutoSync"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn blue" onClick={save}>
+            Save
+          </button>
+        </>
+      }
+    >
+      <p className="first">Only changes how the folder is shown here. Nothing on disk or GitHub is renamed.</p>
+      <input
+        ref={input}
+        className="text-input"
+        aria-label="Name in AutoSync"
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && save()}
+      />
+    </Sheet>
+  )
 }

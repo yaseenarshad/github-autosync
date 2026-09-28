@@ -159,7 +159,7 @@ app.on('second-instance', () => {
 
 void app.whenReady().then(() => {
   if (!primary) return
-  registerIpc({ registry, manager, hostname: HOST, status, apply })
+  registerIpc({ registry, manager, hostname: HOST, status, apply, navigate })
   Menu.setApplicationMenu(appMenu())
   tray = createTray(join(app.getAppPath(), 'resources', 'tray'), {
     open: navigate,

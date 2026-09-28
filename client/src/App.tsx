@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppStatus, FolderStatus } from '@shared/types'
+import type { AppStatus, FolderStatus, NavTarget } from '@shared/types'
 import { pickAndCheck } from './components/AddFolderSheet'
 import { Banners } from './components/Banners'
 import { FirstRun } from './components/FirstRun'
@@ -11,6 +11,7 @@ import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { homeDir } from './lib/format'
 import { platform } from './lib/platform'
+import { attentionPrompt } from './lib/prompts'
 
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null)
@@ -23,7 +24,8 @@ export function App() {
     const offStatus = api.onStatus(setStatus)
     const offNavigate = api.onNavigate((target) => {
       setSelected(target.folderId)
-      setSheet(target.sheet ? { kind: target.sheet } : null)
+      setSheet(sheetFor(target))
+      if (target.copyPrompt && target.folderId) void copyAttentionPrompt(target.folderId)
     })
     void api.getStatus().then(setStatus)
     return () => {
@@ -91,4 +93,15 @@ function useFolderShortcuts(folder: FolderStatus | null) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [id, webUrl])
+}
+
+function sheetFor({ sheet, folderId }: NavTarget): SheetState | null {
+  if (sheet === 'settings' || sheet === 'pause' || sheet === 'resume') return { kind: sheet }
+  return sheet && folderId ? { kind: sheet, id: folderId } : null
+}
+
+/** The right-click menu's "Copy AI prompt" (D18): the prompt texts live here, so main asks the window to copy. */
+async function copyAttentionPrompt(folderId: string) {
+  const folder = (await window.autosync.getStatus()).folders.find((f) => f.id === folderId)
+  if (folder?.attention) await window.autosync.copyText(attentionPrompt(folder, folder.attention))
 }
