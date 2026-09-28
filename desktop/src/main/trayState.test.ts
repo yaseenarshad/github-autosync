@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NavTarget, SyncState } from '@shared/types'
 import { makeFolder, makeStatus } from '@shared/testFixtures'
 import { clock } from '@shared/status'
-import { trayState, trayTemplate, trayVariant } from './trayState'
+import { trayState, trayTemplate } from './trayState'
 
 const f = (id: string, state: SyncState, extra = {}) => makeFolder({ id, name: id, state, ...extra })
 
@@ -18,7 +18,7 @@ describe('trayState (worst enabled folder wins)', () => {
     expect(trayState(makeStatus(states.map((s, i) => f(`f${i}`, s))))).toBe(expected)
   })
 
-  it('ignores disabled folders, shows the bare octopus when none is enabled, and paused beats everything', () => {
+  it('ignores disabled folders, shows the grey ring when none is enabled, and paused beats everything', () => {
     expect(trayState(makeStatus([f('a', 'synced'), f('b', 'off', { enabled: false, attention: { kind: 'auth' } })]))).toBe('synced')
     expect(trayState(makeStatus([f('b', 'off', { enabled: false })]))).toBe('plain')
     expect(trayState(makeStatus([f('a', 'off')], { paused: true }))).toBe('paused')
@@ -78,17 +78,5 @@ describe('trayTemplate', () => {
     const items = trayTemplate(makeStatus([f('Alpha', 'off')], { paused: true }), actions())
     expect(labels(items)).toContain('● Alpha — Paused')
     expect(items.find((i) => i.label === 'Sync all now')?.enabled).toBe(false)
-  })
-})
-
-describe('trayVariant (D19: the OS appearance, never the app theme)', () => {
-  it('on a Mac follows AppleInterfaceStyle alone', () => {
-    expect(trayVariant('darwin', { appleInterfaceStyle: 'Dark', systemUiDark: false })).toBe('dark')
-    expect(trayVariant('darwin', { appleInterfaceStyle: '', systemUiDark: true })).toBe('light')
-  })
-
-  it('on Windows follows the taskbar', () => {
-    expect(trayVariant('win32', { appleInterfaceStyle: '', systemUiDark: true })).toBe('dark')
-    expect(trayVariant('win32', { appleInterfaceStyle: '', systemUiDark: false })).toBe('light')
   })
 })
