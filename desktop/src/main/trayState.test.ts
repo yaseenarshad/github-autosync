@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import type { NavTarget, SyncState } from '@shared/types'
 import { appStatus, folder } from './statusFixture'
-import { clockTime, trayState, trayTemplate } from './trayState'
+import { clockTime, trayState, trayTemplate, trayVariant } from './trayState'
 
 const f = (id: string, state: SyncState, extra = {}) => folder({ id, name: id, state, ...extra })
 
@@ -88,5 +88,17 @@ describe('trayTemplate', () => {
     const items = trayTemplate(appStatus([f('Alpha', 'off')], { paused: true }), actions())
     expect(labels(items)).toContain('● Alpha — Paused')
     expect(items.find((i) => i.label === 'Sync all now')?.enabled).toBe(false)
+  })
+})
+
+describe('trayVariant (D19: the OS appearance, never the app theme)', () => {
+  it('on a Mac follows AppleInterfaceStyle alone', () => {
+    expect(trayVariant('darwin', { appleInterfaceStyle: 'Dark', systemUiDark: false })).toBe('dark')
+    expect(trayVariant('darwin', { appleInterfaceStyle: '', systemUiDark: true })).toBe('light')
+  })
+
+  it('on Windows follows the taskbar', () => {
+    expect(trayVariant('win32', { appleInterfaceStyle: '', systemUiDark: true })).toBe('dark')
+    expect(trayVariant('win32', { appleInterfaceStyle: '', systemUiDark: false })).toBe('light')
   })
 })

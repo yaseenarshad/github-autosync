@@ -28,6 +28,7 @@ function mockApi(status: AppStatus) {
     syncNow: vi.fn(async () => {}),
     activity: vi.fn(async (): Promise<ActivityPage> => ({ entries: [], cursor: null })),
     setLaunchAtLogin: vi.fn(),
+    setTheme: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -245,5 +246,19 @@ describe('folder right-click menu (D18)', () => {
     const api = await mount(makeStatus([folder]))
     await act(async () => navigate({ folderId: 'notes', copyPrompt: true }))
     expect(api.copyText).toHaveBeenCalledWith(expect.stringContaining(folder.path))
+  })
+})
+
+describe('theme (D19)', () => {
+  it('the Settings sheet shows the current theme and applies a new one at once', async () => {
+    const api = await mount(makeStatus([makeFolder({ id: 'notes' })], { theme: 'system' }))
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    const radio = (label: string) => [...document.querySelectorAll('[role="radiogroup"][aria-label="Theme"] [role="radio"]')].find((b) => b.textContent === label)!
+    expect(radio('System').getAttribute('aria-checked')).toBe('true')
+    expect(radio('Dark').getAttribute('aria-checked')).toBe('false')
+
+    await click(radio('Dark') as HTMLButtonElement)
+
+    expect(api.setTheme).toHaveBeenCalledWith('dark')
   })
 })

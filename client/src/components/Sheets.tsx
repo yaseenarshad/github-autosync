@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AppStatus, FolderStatus, FolderVerdict } from '@shared/types'
+import type { AppStatus, FolderStatus, FolderVerdict, ThemeChoice } from '@shared/types'
 import { AddFolderSheet } from './AddFolderSheet'
 import { platform } from '../lib/platform'
 
@@ -80,6 +80,12 @@ function ConfirmSheet({ title, confirm, danger, onConfirm, onClose, children }: 
   )
 }
 
+const THEMES: ReadonlyArray<[ThemeChoice, string]> = [
+  ['system', 'System'],
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+]
+
 function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => void }) {
   return (
     <Sheet
@@ -101,6 +107,15 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
         >
           <span className="track" />
         </button>
+      </Setting>
+      <Setting title="Theme" detail="System follows your computer's light or dark setting.">
+        <div className="seg" role="radiogroup" aria-label="Theme">
+          {THEMES.map(([value, label]) => (
+            <button key={value} role="radio" aria-checked={status.theme === value} className={status.theme === value ? 'on' : ''} onClick={() => window.autosync.setTheme(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
       </Setting>
       <Setting
         title="This computer's name"

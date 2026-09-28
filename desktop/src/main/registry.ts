@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { ThemeChoice } from '@shared/types'
 import type { FolderConfig } from './git/manager'
 
 /**
@@ -17,6 +18,8 @@ export interface Config {
   folders: FolderConfig[]
   launchAtLogin: boolean
   paused: boolean
+  /** D19: Electron's own `themeSource` vocabulary, so applying it is one assignment. */
+  theme: ThemeChoice
 }
 
 export interface Registry {
@@ -25,7 +28,9 @@ export interface Registry {
   update(change: (config: Config) => Config): Config
 }
 
-const defaults = (): Config => ({ version: 1, folders: [], launchAtLogin: true, paused: false })
+const defaults = (): Config => ({ version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system' })
+
+const THEMES: readonly unknown[] = ['system', 'light', 'dark'] satisfies ThemeChoice[]
 
 const isFolder = (v: unknown): v is FolderConfig => {
   const f = v as Partial<FolderConfig> | null
@@ -36,7 +41,9 @@ function parse(raw: string): Config | null {
   try {
     const v = JSON.parse(raw) as Partial<Config> | null
     if (v?.version !== 1 || !Array.isArray(v.folders) || !v.folders.every(isFolder) || typeof v.launchAtLogin !== 'boolean' || typeof v.paused !== 'boolean') return null
-    return { version: 1, folders: v.folders, launchAtLogin: v.launchAtLogin, paused: v.paused }
+    // `theme` arrived after the first configs were written: absent means the default, anything else unknown is malformed.
+    if (v.theme !== undefined && !THEMES.includes(v.theme)) return null
+    return { version: 1, folders: v.folders, launchAtLogin: v.launchAtLogin, paused: v.paused, theme: v.theme ?? 'system' }
   } catch {
     return null
   }

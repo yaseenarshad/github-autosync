@@ -28,7 +28,7 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
 }
 
 export function makeStatus(folders: FolderStatus[], extra: Partial<AppStatus> = {}): AppStatus {
-  return { folders, paused: false, gitMissing: false, hostname: 'MacBook-Pro', launchAtLogin: false, ...extra }
+  return { folders, paused: false, gitMissing: false, hostname: 'MacBook-Pro', launchAtLogin: false, theme: 'system', ...extra }
 }
 
 export function makeEntry(extra: Partial<ActivityEntry> & Pick<ActivityEntry, 'sha' | 'time'>): ActivityEntry {

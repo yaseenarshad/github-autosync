@@ -29,5 +29,5 @@ export function folder(over: Partial<FolderStatus> = {}): FolderStatus {
 }
 
 export function appStatus(folders: FolderStatus[], over: Partial<AppStatus> = {}): AppStatus {
-  return { folders, paused: false, gitMissing: false, hostname: 'Mac-A', launchAtLogin: true, ...over }
+  return { folders, paused: false, gitMissing: false, hostname: 'Mac-A', launchAtLogin: true, theme: 'system', ...over }
 }

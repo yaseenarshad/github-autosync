@@ -19,16 +19,16 @@ async function dir(): Promise<string> {
 describe('registry (D5)', () => {
   it('starts from defaults and writes nothing until something changes', async () => {
     const d = await dir()
-    expect(createRegistry(d).get()).toEqual({ version: 1, folders: [], launchAtLogin: true, paused: false })
+    expect(createRegistry(d).get()).toEqual({ version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system' })
     expect(existsSync(path.join(d, 'config.json'))).toBe(false)
   })
 
   it('round-trips through config.json, leaving no temp file behind', async () => {
     const d = await dir()
     const folder = newFolder('/Users/me/notes')
-    createRegistry(d).update((c) => ({ ...c, folders: [folder], paused: true, launchAtLogin: false }))
+    createRegistry(d).update((c) => ({ ...c, folders: [folder], paused: true, launchAtLogin: false, theme: 'dark' }))
 
-    expect(createRegistry(d).get()).toEqual({ version: 1, folders: [folder], launchAtLogin: false, paused: true })
+    expect(createRegistry(d).get()).toEqual({ version: 1, folders: [folder], launchAtLogin: false, paused: true, theme: 'dark' })
     expect(JSON.parse(readFileSync(path.join(d, 'config.json'), 'utf8')).folders[0]).toEqual({ id: folder.id, path: '/Users/me/notes', enabled: true })
     expect(existsSync(path.join(d, 'config.json.tmp'))).toBe(false)
   })
@@ -44,12 +44,12 @@ describe('registry (D5)', () => {
     expect(registry.get().folders).toHaveLength(1)
   })
 
-  it.each([['{not json'], ['{"version":2,"folders":[],"launchAtLogin":true,"paused":false}'], ['{"version":1,"folders":[{"id":1}],"launchAtLogin":true,"paused":false}'], ['null']])(
+  it.each([['{not json'], ['{"version":2,"folders":[],"launchAtLogin":true,"paused":false}'], ['{"version":1,"folders":[{"id":1}],"launchAtLogin":true,"paused":false}'], ['null'], ['{"version":1,"folders":[],"launchAtLogin":true,"paused":false,"theme":"sepia"}']])(
     'moves a malformed file (%s) aside to config.json.bak and starts from defaults',
     async (raw) => {
       const d = await dir()
       writeFileSync(path.join(d, 'config.json'), raw)
-      expect(createRegistry(d).get()).toEqual({ version: 1, folders: [], launchAtLogin: true, paused: false })
+      expect(createRegistry(d).get()).toEqual({ version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system' })
       expect(readFileSync(path.join(d, 'config.json.bak'), 'utf8')).toBe(raw)
       expect(existsSync(path.join(d, 'config.json'))).toBe(false)
     },
@@ -77,5 +77,12 @@ describe('registry (D5)', () => {
     const d = await dir()
     writeFileSync(path.join(d, 'config.json'), JSON.stringify({ version: 1, folders: [{ id: 'x', path: '/x', enabled: true, alias: 3 }], launchAtLogin: true, paused: false }))
     expect(createRegistry(d).get().folders).toEqual([])
+  })
+
+  it('reads a config written before the theme setting existed as theme `system`, folders intact (D19)', async () => {
+    const d = await dir()
+    const folder = newFolder('/x')
+    writeFileSync(path.join(d, 'config.json'), JSON.stringify({ version: 1, folders: [folder], launchAtLogin: true, paused: false }))
+    expect(createRegistry(d).get()).toEqual({ version: 1, folders: [folder], launchAtLogin: true, paused: false, theme: 'system' })
   })
 })

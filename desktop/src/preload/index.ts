@@ -40,6 +40,7 @@ const api: AutoSyncApi = {
   syncNow: (id) => ipcRenderer.invoke(channel('syncNow'), id),
   activity: (id, cursor) => ipcRenderer.invoke(channel('activity'), id, cursor),
   setLaunchAtLogin: (on) => ipcRenderer.invoke(channel('setLaunchAtLogin'), on),
+  setTheme: (theme) => ipcRenderer.invoke(channel('setTheme'), theme),
   showInFinder: (id) => ipcRenderer.invoke(channel('showInFinder'), id),
   openExternal: (url) => ipcRenderer.invoke(channel('openExternal'), url),
   copyText: (text) => ipcRenderer.invoke(channel('copyText'), text),

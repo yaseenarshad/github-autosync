@@ -83,7 +83,11 @@ export interface AppStatus {
   /** This computer's name as used in commit messages and conflict copies (D16). */
   hostname: string
   launchAtLogin: boolean
+  /** D19: `system` follows macOS/Windows; `light`/`dark` force the window's look. */
+  theme: ThemeChoice
 }
+
+export type ThemeChoice = 'system' | 'light' | 'dark'
 
 /** D10: the Activity log is read from git history only. */
 export type ActivityKind = 'sent' | 'received' | 'conflict' | 'manual'
