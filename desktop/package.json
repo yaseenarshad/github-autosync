@@ -1,0 +1,68 @@
+{
+  "name": "desktop",
+  "productName": "GitHub AutoSync",
+  "private": true,
+  "author": "Yasin Arshad",
+  "version": "0.1.0",
+  "description": "GitHub AutoSync — Electron shell (main + preload); the renderer is ../client",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "pack": "electron-builder",
+    "icons": "node scripts/render-icons.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^22.0.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "chokidar": "^4.0.3",
+    "electron": "43.4.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.yaseenarshad.githubautosync",
+    "productName": "GitHub AutoSync",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "dist-app"
+    },
+    "files": [
+      "out/**",
+      "resources/**"
+    ],
+    "afterPack": "build/adhocSign.cjs",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null,
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-win-x64-setup.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-arm64.dmg"
+    }
+  }
+}

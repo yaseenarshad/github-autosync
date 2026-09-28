@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+desktop/dist-app/
+*.dmg
+*.exe
+*.blockmap
+.DS_Store
+*.log
+.claude/*
