@@ -166,7 +166,7 @@ it('folder page: problem card copies its prompt, activity collapses bursts', asy
 })
 
 describe('folder shortcuts', () => {
-  it('Show in file manager and View on GitHub act on the selected folder', async () => {
+  it('Reveal in file manager and View on GitHub act on the selected folder', async () => {
     const api = await mount(oneFolder)
     await click(button('notes'))
     await shortcut('F')

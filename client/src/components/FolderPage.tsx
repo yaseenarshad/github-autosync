@@ -98,7 +98,7 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
         <div className="actions">
           <Action title={`View the files in ${platform.fileManager}`} detail={<span className="kbd">{platform.shortcut('F')}</span>}>
             <button className="btn" onClick={() => api.showInFinder(f.id)}>
-              Show in {platform.fileManager}
+              Reveal in {platform.fileManager}
             </button>
           </Action>
           {f.webUrl && (
@@ -231,7 +231,7 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
         <CopyPromptButton text={prompt} className="btn blue" />
         <button className="btn" onClick={() => window.autosync.showInFinder(f.id)}>
           <Icon name="folder" />
-          Show in {platform.fileManager}
+          Reveal in {platform.fileManager}
         </button>
         <button className="btn" onClick={() => window.autosync.syncNow(f.id)}>
           <Icon name="sync" />I fixed it — check again
