@@ -29,4 +29,11 @@ export interface AutoSyncApi {
   /** Only `https://github.com/…` URLs are opened. */
   openExternal(url: string): Promise<void>
   copyText(text: string): Promise<void>
+
+  /** D18: the native right-click menu for a folder (sidebar row or overview row). */
+  showFolderMenu(id: string): Promise<void>
+  /** Null clears the nickname. */
+  setAlias(id: string, alias: string | null): Promise<AppStatus>
+  openInTerminal(id: string): Promise<void>
+  openInEditor(id: string): Promise<void>
 }

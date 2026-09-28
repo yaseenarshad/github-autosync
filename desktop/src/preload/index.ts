@@ -43,6 +43,10 @@ const api: AutoSyncApi = {
   showInFinder: (id) => ipcRenderer.invoke(channel('showInFinder'), id),
   openExternal: (url) => ipcRenderer.invoke(channel('openExternal'), url),
   copyText: (text) => ipcRenderer.invoke(channel('copyText'), text),
+  showFolderMenu: (id) => ipcRenderer.invoke(channel('showFolderMenu'), id),
+  setAlias: (id, alias) => ipcRenderer.invoke(channel('setAlias'), id, alias),
+  openInTerminal: (id) => ipcRenderer.invoke(channel('openInTerminal'), id),
+  openInEditor: (id) => ipcRenderer.invoke(channel('openInEditor'), id),
 }
 
 contextBridge.exposeInMainWorld('autosync', api)

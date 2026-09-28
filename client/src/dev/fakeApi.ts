@@ -15,6 +15,7 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     id: name,
     path: `${HOME}/${dir}/${name}`,
     name,
+    alias: null,
     enabled: true,
     state: 'synced',
     direction: null,
@@ -193,6 +194,11 @@ export function createFakeApi(): AutoSyncApi {
       return Promise.resolve({ entries: all.slice(cursor, next), cursor: next < all.length ? next : null })
     },
     setLaunchAtLogin: (on) => set({ ...status, launchAtLogin: on }),
+    showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
+    // Fake ids are the folder names.
+    setAlias: (id, alias) => patch(id, { alias, name: alias ?? id }),
+    openInTerminal: async (id) => console.info('openInTerminal', id),
+    openInEditor: async (id) => console.info('openInEditor', id),
     showInFinder: async (id) => console.info('showInFinder', id),
     openExternal: async (url) => void window.open(url, '_blank'),
     copyText: (text) => navigator.clipboard.writeText(text),

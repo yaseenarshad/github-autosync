@@ -41,7 +41,10 @@ export interface FolderStatus {
   id: string
   /** Absolute path on this computer. */
   path: string
+  /** Display name: the nickname when set, else the folder's own name. */
   name: string
+  /** "Rename in AutoSync…" nickname (D18); never renames anything on disk. */
+  alias: string | null
   enabled: boolean
   state: SyncState
   /** Set while `state === 'syncing'`: sending local commits vs. receiving the other computers'. */
@@ -112,5 +115,8 @@ export type FolderVerdict =
 /** Where a menu bar / notification click wants the window to go. */
 export interface NavTarget {
   folderId: string | null
-  sheet?: 'settings' | 'pause' | 'resume'
+  /** Sheets a click can open. The folder ones act on `folderId` and come from the right-click menu (D18). */
+  sheet?: 'settings' | 'pause' | 'resume' | 'folder-off' | 'folder-on' | 'remove' | 'rename'
+  /** Right-click "Copy AI prompt": the prompt texts live in the renderer, so main asks it to copy. */
+  copyPrompt?: boolean
 }

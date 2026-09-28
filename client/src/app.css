@@ -382,6 +382,12 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
 .set .t { font-weight: 600; }
 .set .d { color: var(--muted); font-size: 12px; }
 
+.text-input {
+  width: 100%; height: 30px; padding: 0 8px; font: inherit; color: var(--text);
+  background: var(--input); border: 1px solid var(--btn-border); border-radius: var(--radius); outline: 0;
+}
+.text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(33, 136, 255, .25); }
+
 @media (max-width: 900px) {
   .body { grid-template-columns: 220px 1fr; }
   .tb-2 { display: none; }

@@ -103,7 +103,15 @@ function FolderRow({
 }) {
   const v = folderView(f, status)
   return (
-    <button className={`plain row ${selected ? 'sel' : ''} ${v.cls === 'off' ? 'dim' : ''}`} onClick={onSelect}>
+    <button
+      className={`plain row ${selected ? 'sel' : ''} ${v.cls === 'off' ? 'dim' : ''}`}
+      onClick={onSelect}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onSelect()
+        void window.autosync.showFolderMenu(f.id)
+      }}
+    >
       <span className={`dot ${v.cls}`} />
       <div className="min0">
         <div className="name">{f.name}</div>

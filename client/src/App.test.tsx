@@ -2,19 +2,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { AutoSyncApi } from '@shared/api'
-import type { ActivityPage, AppStatus } from '@shared/types'
+import type { ActivityPage, AppStatus, NavTarget } from '@shared/types'
 import { App } from './App'
 import { platform } from './lib/platform'
 import { makeEntry, makeFolder, makeStatus } from './test/fixtures'
 
 let root: Root
 let container: HTMLElement
+let navigate: (target: NavTarget) => void
 
 function mockApi(status: AppStatus) {
   const api = {
     getStatus: vi.fn(async () => status),
     onStatus: vi.fn(() => () => {}),
-    onNavigate: vi.fn(() => () => {}),
+    onNavigate: vi.fn((listener: (target: NavTarget) => void) => {
+      navigate = listener
+      return () => {}
+    }),
     pickFolder: vi.fn(),
     checkFolder: vi.fn(),
     addFolder: vi.fn(),
@@ -27,6 +31,10 @@ function mockApi(status: AppStatus) {
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
+    showFolderMenu: vi.fn(async () => {}),
+    setAlias: vi.fn(async () => status),
+    openInTerminal: vi.fn(),
+    openInEditor: vi.fn(),
   } satisfies AutoSyncApi
   window.autosync = api
   return api
@@ -183,5 +191,59 @@ describe('folder shortcuts', () => {
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', shiftKey: true })))
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true, ctrlKey: true })))
     expect(api.showInFinder).not.toHaveBeenCalled()
+  })
+})
+
+describe('folder right-click menu (D18)', () => {
+  const rightClick = (el: Element) =>
+    act(async () => void el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+
+  it('right-clicking a sidebar or overview row asks main for the native menu', async () => {
+    const api = await mount(oneFolder)
+    await rightClick(document.querySelector('.ov-row')!)
+    expect(api.showFolderMenu).toHaveBeenCalledWith('notes')
+    expect(container.textContent).toContain('All folders')
+
+    await rightClick(button('notes'))
+    expect(api.showFolderMenu).toHaveBeenCalledTimes(2)
+  })
+
+  it('menu "Turn off syncing…" opens the confirm sheet, not the API', async () => {
+    const api = await mount(oneFolder)
+    await act(async () => navigate({ folderId: 'notes', sheet: 'folder-off' }))
+    expect(dialog()?.getAttribute('aria-label')).toBe('Turn off syncing for “notes”?')
+    expect(api.setFolderEnabled).not.toHaveBeenCalled()
+  })
+
+  it('rename saves the trimmed nickname, or clears it when blank', async () => {
+    const api = await mount(oneFolder)
+    const rename = async (value: string) => {
+      await act(async () => navigate({ folderId: 'notes', sheet: 'rename' }))
+      expect(dialog()?.getAttribute('aria-label')).toBe('Rename in AutoSync')
+      const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+      expect(document.activeElement).toBe(input)
+      expect(input.value).toBe('notes')
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      return input
+    }
+
+    await rename('  Journal  ')
+    await click(button('Save'))
+    expect(api.setAlias).toHaveBeenLastCalledWith('notes', 'Journal')
+    expect(dialog()).toBeNull()
+
+    const input = await rename('   ')
+    await act(async () => void input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(api.setAlias).toHaveBeenLastCalledWith('notes', null)
+  })
+
+  it('menu "Copy AI prompt" copies the folder\'s prompt', async () => {
+    const folder = makeFolder({ id: 'notes', state: 'attention', attention: { kind: 'no-identity' } })
+    const api = await mount(makeStatus([folder]))
+    await act(async () => navigate({ folderId: 'notes', copyPrompt: true }))
+    expect(api.copyText).toHaveBeenCalledWith(expect.stringContaining(folder.path))
   })
 })

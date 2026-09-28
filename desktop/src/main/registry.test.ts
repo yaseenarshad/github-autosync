@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { tempDir } from './git/gitFixture'
-import { createRegistry, newFolder } from './registry'
+import { createRegistry, newFolder, withAlias } from './registry'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -60,5 +60,22 @@ describe('registry (D5)', () => {
     const b = newFolder('/a')
     expect(a.id).toMatch(/^[0-9a-f-]{36}$/)
     expect(a.id).not.toBe(b.id)
+  })
+
+  it('stores a trimmed nickname, drops a blank one, and round-trips it', async () => {
+    const d = await dir()
+    const folder = newFolder('/Users/me/notes')
+    expect(withAlias(folder, '  Work notes ')).toEqual({ ...folder, alias: 'Work notes' })
+    expect(withAlias({ ...folder, alias: 'Old' }, '   ')).toEqual(folder)
+    expect(withAlias({ ...folder, alias: 'Old' }, null)).toEqual(folder)
+
+    createRegistry(d).update((c) => ({ ...c, folders: [withAlias(folder, 'Work notes')] }))
+    expect(createRegistry(d).get().folders).toEqual([{ ...folder, alias: 'Work notes' }])
+  })
+
+  it('treats a non-string nickname as a malformed file', async () => {
+    const d = await dir()
+    writeFileSync(path.join(d, 'config.json'), JSON.stringify({ version: 1, folders: [{ id: 'x', path: '/x', enabled: true, alias: 3 }], launchAtLogin: true, paused: false }))
+    expect(createRegistry(d).get().folders).toEqual([])
   })
 })

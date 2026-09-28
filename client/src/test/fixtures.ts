@@ -5,6 +5,7 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
     id: 'notes',
     path: '/Users/yasin/Documents/GitHub/notes',
     name: 'notes',
+    alias: null,
     enabled: true,
     state: 'synced',
     direction: null,
