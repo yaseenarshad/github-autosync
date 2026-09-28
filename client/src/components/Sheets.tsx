@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import type { AppStatus, FolderVerdict } from '@shared/types'
 import { AddFolderSheet } from './AddFolderSheet'
+import { platform } from '../lib/platform'
 
 export type SheetState =
   | { kind: 'settings' }
@@ -89,7 +90,7 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
         </button>
       }
     >
-      <Setting title="Open at login" detail="Starts quietly in the menu bar when you log in. The window stays closed.">
+      <Setting title="Open at login" detail={`Starts quietly in the ${platform.bar} when you log in. The window stays closed.`}>
         <button
           className={`switch ${status.launchAtLogin ? 'on' : ''}`}
           role="switch"
@@ -100,7 +101,10 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
           <span className="track" />
         </button>
       </Setting>
-      <Setting title="This computer's name" detail="Shown in commit messages and conflict copies so you know which Mac changed what.">
+      <Setting
+        title="This computer's name"
+        detail={`Shown in commit messages and conflict copies so you know which ${platform.machine} changed what.`}
+      >
         <span className="mono">{status.hostname}</span>
       </Setting>
       <Setting title="When it syncs" detail="Sends 30s after you stop editing · checks GitHub every minute · on wake · when you quit." />
@@ -147,10 +151,10 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           onClose={onClose}
         >
           <p className="first">
-            Nothing will be committed, pulled, or pushed until you resume. Your edits stay safe on this Mac, but{' '}
+            Nothing will be committed, pulled, or pushed until you resume. Your edits stay safe on {platform.here}, but{' '}
             <b>your other computers won't get them</b> — and you won't get theirs.
           </p>
-          <p className="muted last">The menu bar icon switches to ⏸ while paused, so you won't forget.</p>
+          <p className="muted last">The {platform.bar} icon switches to ⏸ while paused, so you won't forget.</p>
         </ConfirmSheet>
       )
     case 'resume':
@@ -162,7 +166,7 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           onClose={onClose}
         >
           <p className="first last">
-            AutoSync will catch up right away: send what's waiting on this Mac and pull what changed on your other computers.
+            AutoSync will catch up right away: send what's waiting on {platform.here} and pull what changed on your other computers.
           </p>
         </ConfirmSheet>
       )
@@ -183,8 +187,8 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           onClose={onClose}
         >
           <p className="first">
-            This folder will stop syncing <b>on this Mac only</b>. Edits here won't reach your other computers, and theirs won't arrive
-            here, until you turn it back on.
+            This folder will stop syncing <b>on {platform.here} only</b>. Edits here won't reach your other computers, and theirs won't
+            arrive here, until you turn it back on.
           </p>
           <p className="muted last">Nothing is deleted. It stays in your folder list with a grey dot.</p>
         </ConfirmSheet>
@@ -214,8 +218,8 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           }}
           onClose={onClose}
         >
-          AutoSync will stop syncing this folder on this Mac. <b>Nothing is deleted</b> — the files stay on your Mac and on GitHub. Your
-          other computers keep syncing it until you remove it there too.
+          AutoSync will stop syncing this folder on {platform.here}. <b>Nothing is deleted</b> — the files stay on {platform.yours} and on
+          GitHub. Your other computers keep syncing it until you remove it there too.
         </ConfirmSheet>
       )
   }

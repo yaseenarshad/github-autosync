@@ -2,6 +2,7 @@ import type { AppStatus } from '@shared/types'
 import { gitMissingPrompt } from '../lib/prompts'
 import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
+import { platform } from '../lib/platform'
 
 export function Banners({ status, onResume }: { status: AppStatus; onResume: () => void }) {
   return (
@@ -19,7 +20,7 @@ export function Banners({ status, onResume }: { status: AppStatus; onResume: () 
         <div className="gbanner warn">
           <Icon name="pause" style={{ color: 'var(--warn)' }} />
           <span className="grow">
-            <b>Syncing is paused.</b> Edits are saved on this Mac and will send when you resume.
+            <b>Syncing is paused.</b> Edits are saved on {platform.here} and will send when you resume.
           </span>
           <button className="btn" onClick={onResume}>
             <Icon name="play" />

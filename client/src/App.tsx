@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppStatus } from '@shared/types'
+import type { AppStatus, FolderStatus } from '@shared/types'
 import { pickAndCheck } from './components/AddFolderSheet'
 import { Banners } from './components/Banners'
 import { FirstRun } from './components/FirstRun'
@@ -10,6 +10,7 @@ import { AppSheet, type SheetState } from './components/Sheets'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { homeDir } from './lib/format'
+import { platform } from './lib/platform'
 
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null)
@@ -31,10 +32,12 @@ export function App() {
     }
   }, [])
 
+  const folder = status?.folders.find((f) => f.id === selected) ?? null
+  useFolderShortcuts(sheet ? null : folder)
+
   const titlebar = <div className="titlebar">GitHub AutoSync</div>
   if (!status) return <div className="window">{titlebar}</div>
 
-  const folder = status.folders.find((f) => f.id === selected) ?? null
   const home = homeDir(status.folders[0]?.path)
 
   async function openAdd() {
@@ -69,4 +72,23 @@ export function App() {
       {sheet && <AppSheet sheet={sheet} status={status} home={home} onClose={() => setSheet(null)} onSelect={setSelected} />}
     </div>
   )
+}
+
+/** The action list's shortcuts: ⌘⇧F / ⌘⇧G on a Mac, Ctrl+Shift+F / Ctrl+Shift+G elsewhere. Off when `folder` is null. */
+function useFolderShortcuts(folder: FolderStatus | null) {
+  const id = folder?.id
+  const webUrl = folder?.webUrl
+  useEffect(() => {
+    if (!id) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.shiftKey || !(platform.mac ? e.metaKey : e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      if (key === 'f') void window.autosync.showInFinder(id)
+      else if (key === 'g' && webUrl) void window.autosync.openExternal(webUrl)
+      else return
+      e.preventDefault()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [id, webUrl])
 }

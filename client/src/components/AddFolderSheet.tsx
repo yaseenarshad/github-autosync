@@ -5,6 +5,7 @@ import { gitMissingPrompt, loginPrompt, noOriginPrompt } from '../lib/prompts'
 import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
 import { Sheet } from './Sheets'
+import { platform } from '../lib/platform'
 
 /** Native picker, then the main process's verdict (D12); null when the picker was cancelled. */
 export async function pickAndCheck(): Promise<FolderVerdict | null> {
@@ -106,7 +107,7 @@ function Verdict({ verdict: v, home, onUseRoot }: { verdict: FolderVerdict; home
       return (
         <Box tone="bad" prompt={loginPrompt(v.path)}>
           GitHub login isn't set up on this computer, so AutoSync can't reach this repo. It's a one-time fix: run “gh auth login” in
-          Terminal, then try again.
+          {platform.terminal}, then try again.
         </Box>
       )
     case 'no-git':
