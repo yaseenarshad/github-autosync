@@ -55,6 +55,7 @@ function createWindow(): BrowserWindow {
     if (quitting) return
     event.preventDefault()
     created.hide()
+    app.dock?.hide() // D17: no Dock icon while the app lives only in the menu bar
   })
   created.once('ready-to-show', () => created.show())
   if (process.env.ELECTRON_RENDERER_URL) void created.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -65,6 +66,7 @@ function createWindow(): BrowserWindow {
 function showWindow(): BrowserWindow {
   // Installing git is the one fix made outside the app; opening the window is when it gets noticed.
   void probeGit()
+  void app.dock?.show()
   if (win === null) {
     win = createWindow()
     return win
@@ -173,7 +175,10 @@ void app.whenReady().then(() => {
   app.on('activate', () => void showWindow())
   // D4: start in the menu bar; only a first run (nothing to sync yet) opens the window.
   if (registry.get().folders.length === 0) showWindow()
-  else void probeGit()
+  else {
+    app.dock?.hide()
+    void probeGit()
+  }
 })
 
 // The window hides rather than closes, so this only fires on the way out; without a listener Electron would quit.

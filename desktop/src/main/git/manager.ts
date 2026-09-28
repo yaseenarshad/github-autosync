@@ -13,9 +13,13 @@ import type { PassResult } from './sync'
  *
  * The cadence, in one place so it can be argued with:
  *   - START and ENABLE pull: a folder turns on with a pass.
- *   - EDITS settle first. A watcher event marks the folder pending at once (the UI counts down to
- *     `sendAt`), then a trailing debounce (`quietMs`, 30 s) waits for the user to stop saving. A
- *     short look (`peekMs`) reads which files are pending meanwhile, without committing anything.
+ *   - EDITS settle first. A watcher event is only a hint: once the burst pauses (`peekMs`, 1 s)
+ *     `git status` says whether anything really changed. Real changes mark the folder pending and
+ *     start a trailing debounce (`quietMs`, 30 s, the UI counts down to `sendAt`) that every later
+ *     save pushes back; a clean look (an ignored file, an edit undone) cancels it.
+ *   - AUTOSYNC'S OWN WRITES are not edits: a rebase bringing the other computers' changes in lands
+ *     while its pass runs or just after (`ownWritesMs`, 1 s), and those events are dropped. An edit
+ *     the user made during a pass is still caught: the pass's closing `git status` finds it.
  *   - OFFLINE waits patiently: exactly one retry (`retryMs`, 2 min, `retryAt`). Wake covers the
  *     common "laptop came back" case sooner than any backoff ladder would.
  *   - WAKE/UNLOCK pull, behind a cooldown, so opening the lid converges without a git storm.
@@ -55,6 +59,7 @@ export interface SyncHost {
   pollMs?: number
   wakeCooldownMs?: number
   peekMs?: number
+  ownWritesMs?: number
 }
 
 export interface SyncManager {
@@ -72,6 +77,7 @@ const DEFAULT_RETRY_MS = 120_000
 const DEFAULT_POLL_MS = 60_000
 const DEFAULT_WAKE_COOLDOWN_MS = 10_000
 const DEFAULT_PEEK_MS = 1_000
+const DEFAULT_OWN_WRITES_MS = 1_000
 
 type Timer = ReturnType<typeof setTimeout>
 
@@ -229,6 +235,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
   const pollMs = host.pollMs ?? DEFAULT_POLL_MS
   const wakeCooldownMs = host.wakeCooldownMs ?? DEFAULT_WAKE_COOLDOWN_MS
   const peekMs = host.peekMs ?? DEFAULT_PEEK_MS
+  const ownWritesMs = host.ownWritesMs ?? DEFAULT_OWN_WRITES_MS
 
   /** Registry order. */
   let entries = new Map<string, Entry>()
@@ -288,12 +295,9 @@ export function createSyncManager(host: SyncHost): SyncManager {
             void requestPass(e, 'normal')
           })
         }
-        if (res.level && e.debounce === null) {
-          e.poll = arm(pollMs, () => {
-            e.poll = null
-            void requestPass(e, 'quiet')
-          })
-        }
+        // Level, yet something is pending: the user saved while the pass ran.
+        if (res.level && e.pending.length > 0) armDebounce(e)
+        else if (res.level) armPoll(e)
       }
       host.onChange()
     }
@@ -306,26 +310,44 @@ export function createSyncManager(host: SyncHost): SyncManager {
     else void runPass(e, follow.mode).then(follow.resolve)
   }
 
-  function onEvent(e: Entry): void {
-    if (!e.active) return
-    for (const timer of [e.debounce, e.poll, e.peek]) if (timer !== null) clearTimeout(timer)
+  /** Sends in `quietMs`, pushed back by every call — and the idle poll stands down: the send is coming. */
+  function armDebounce(e: Entry): void {
+    for (const timer of [e.debounce, e.poll]) if (timer !== null) clearTimeout(timer)
     e.poll = null
     e.sendAt = Date.now() + quietMs
     e.debounce = arm(quietMs, () => {
       e.debounce = e.sendAt = null
       void requestPass(e, 'normal')
     })
-    // Which files are waiting, read once the burst pauses; a running pass reads them itself.
+  }
+
+  function armPoll(e: Entry): void {
+    e.poll = arm(pollMs, () => {
+      e.poll = null
+      void requestPass(e, 'quiet')
+    })
+  }
+
+  function onEvent(e: Entry): void {
+    if (!e.active || e.busy || Date.now() - e.lastPassAt < ownWritesMs) return
+    if (e.debounce !== null) armDebounce(e)
+    if (e.peek !== null) clearTimeout(e.peek)
     e.peek = arm(peekMs, () => {
       e.peek = null
       if (e.busy) return
       void host.peek(e.cfg.path).then((pending) => {
         if (pending === null || e.busy || !e.active || !current(e)) return
         setPending(e, pending)
+        if (e.pending.length > 0 && e.debounce === null) armDebounce(e)
+        if (e.pending.length === 0 && e.debounce !== null) {
+          // Undone before it was sent: nothing to send, so back to idling.
+          clearTimeout(e.debounce)
+          e.debounce = e.sendAt = null
+          armPoll(e)
+        }
         host.onChange()
       })
     })
-    host.onChange()
   }
 
   function activate(e: Entry): void {
