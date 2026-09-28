@@ -1,0 +1,25 @@
+{
+  "name": "github-autosync",
+  "private": true,
+  "description": "GitHub AutoSync: menu bar app that auto commits, pulls and pushes chosen git folders across computers (Electron + React)",
+  "workspaces": [
+    "client",
+    "desktop"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w desktop",
+    "build": "npm run build -w desktop",
+    "pack": "npm run build -w desktop && npm run pack -w desktop",
+    "typecheck": "tsc -p client/tsconfig.json --noEmit && tsc -p shared/tsconfig.json --noEmit && tsc -p desktop/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
