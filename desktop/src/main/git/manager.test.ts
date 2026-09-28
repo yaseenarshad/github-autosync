@@ -48,11 +48,14 @@ interface Harness {
   status: () => FolderStatus
 }
 
-interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs'>> {
+interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs' | 'ownWritesMs'>> {
   /** `n` is the 1-based pass count. */
   pass?: (n: number, onDirection: (d: 'up' | 'down') => void) => Promise<PassResult>
+  /** What `git status` finds after a watcher event; by default the event was a real edit. */
   peek?: () => Promise<FileChange[] | null>
 }
+
+const EDIT: FileChange[] = [{ status: 'M', path: 'note.md' }]
 
 function harness(opts: Opts = {}): Harness {
   const passes: Array<{ root: string; flush: boolean }> = []
@@ -68,7 +71,7 @@ function harness(opts: Opts = {}): Harness {
     },
     peek: async () => {
       peeks += 1
-      return opts.peek === undefined ? [] : opts.peek()
+      return opts.peek === undefined ? EDIT : opts.peek()
     },
     watch: (_root, onEvent) => {
       listeners.add(onEvent)
@@ -82,7 +85,8 @@ function harness(opts: Opts = {}): Harness {
     retryMs: opts.retryMs ?? NEVER,
     pollMs: opts.pollMs ?? NEVER,
     wakeCooldownMs: opts.wakeCooldownMs ?? NEVER,
-    peekMs: opts.peekMs ?? NEVER,
+    peekMs: opts.peekMs ?? 1,
+    ownWritesMs: opts.ownWritesMs ?? 0,
   }
   manager = createSyncManager(host)
   return {
@@ -160,7 +164,7 @@ describe('start', () => {
 })
 
 describe('edits (D3 debounce)', () => {
-  it('marks pending at once with a send time, and runs exactly one pass after the quiet period', async () => {
+  it('a real edit marks pending once git status confirms it, and runs exactly one pass after the quiet period', async () => {
     const h = harness({ quietMs: 40 })
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
@@ -169,8 +173,10 @@ describe('edits (D3 debounce)', () => {
     h.emit()
     h.emit()
     h.emit()
-    expect(h.status().state).toBe('pending')
+    await until(() => h.status().state === 'pending')
+    expect(h.status()).toMatchObject({ pending: EDIT, pendingSince: expect.any(Number), sendAt: expect.any(Number) })
     expect(h.status().sendAt).toBeGreaterThanOrEqual(before + 40)
+    expect(h.peeks()).toBe(1)
     expect(h.passes).toHaveLength(1)
 
     await until(() => h.passes.length === 2)
@@ -180,32 +186,64 @@ describe('edits (D3 debounce)', () => {
     expect(h.status().sendAt).toBeNull()
   })
 
-  it('peeks at the pending list while the debounce waits', async () => {
-    const pending: FileChange[] = [{ status: 'M', path: 'note.md' }]
-    const h = harness({ peekMs: 5, peek: async () => pending })
+  it('an event git finds nothing behind (an ignored file, an edit undone) keeps the folder synced and cancels the send', async () => {
+    let found = EDIT
+    const h = harness({ quietMs: 60, peek: async () => found })
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
-
     h.emit()
-    await until(() => h.status().pending.length === 1)
-    expect(h.status()).toMatchObject({ state: 'pending', pending, pendingSince: expect.any(Number) })
-    expect(h.peeks()).toBe(1)
+    await until(() => h.status().state === 'pending')
+
+    found = []
+    h.emit()
+    await until(() => h.peeks() === 2)
+    await sleep(100) // past the send time the first edit armed
+    expect(h.status()).toMatchObject({ state: 'synced', pending: [], sendAt: null, pendingSince: null })
+    expect(h.passes).toHaveLength(1)
+    expect(h.seen.filter((s) => s.state === 'pending')).not.toHaveLength(0)
   })
 
-  it('coalesces edits made during a running pass into one follow-up', async () => {
+  it("ignores AutoSync's own writes: events during a pass, and just after it, never mark pending or run a pass", async () => {
     const g = gate()
-    const h = harness({ quietMs: 5, pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    const h = harness({ quietMs: 5, ownWritesMs: 50, pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length === 1)
 
-    for (let i = 0; i < 20; i += 1) h.emit()
-    await sleep(60) // the debounce fires while pass 1 is still running
-    expect(h.passes).toHaveLength(1)
-    expect(h.status().state).toBe('syncing')
-
+    for (let i = 0; i < 20; i += 1) h.emit() // the rebase writing the other computer's files
     g.release()
-    await until(() => h.passes.length === 2)
+    await until(() => h.status().state === 'synced')
+    h.emit() // the watcher reporting them a moment late
     await sleep(100)
+
+    expect(h.passes).toHaveLength(1)
+    expect(h.peeks()).toBe(0)
+    expect(h.seen.map((s) => s.state)).not.toContain('pending')
+    expect(h.status()).toMatchObject({ state: 'synced', sendAt: null })
+
+    h.emit() // a real edit, once the pass has settled
+    await until(() => h.status().state === 'pending')
+    await until(() => h.passes.length === 2)
+  })
+
+  it('an edit made during a pass is caught by the pass’s own closing status, and sent after the quiet period', async () => {
+    const h = harness({ quietMs: 20, pass: async (n) => (n === 1 ? result({}, EDIT) : result()) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1 && h.status().state === 'pending')
+    expect(h.status().sendAt).toEqual(expect.any(Number))
+    await until(() => h.passes.length === 2 && h.status().state === 'synced')
+  })
+
+  it('coalesces triggers during a running pass into one follow-up', async () => {
+    const g = gate()
+    const h = harness({ pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1)
+
+    const settled = Promise.all([h.manager.syncNow('a'), h.manager.syncNow('a'), h.manager.syncNow(null)])
+    expect(h.status().state).toBe('syncing')
+    g.release()
+    await settled
+    await sleep(60)
     expect(h.passes).toHaveLength(2)
   })
 })
@@ -373,6 +411,7 @@ describe('flushForQuit', () => {
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
     h.emit()
+    await until(() => h.status().sendAt !== null)
 
     await h.manager.flushForQuit()
 

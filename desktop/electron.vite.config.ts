@@ -22,6 +22,7 @@ export default defineConfig({
     root: client,
     plugins: [react()],
     resolve: { alias: { '@shared': shared } },
-    build: { outDir: resolve(here, 'out/renderer'), rollupOptions: { input: resolve(client, 'index.html') } },
+    // electron-vite leaves minification off; the renderer is the one bundle big enough to care.
+    build: { outDir: resolve(here, 'out/renderer'), minify: 'esbuild', rollupOptions: { input: resolve(client, 'index.html') } },
   },
 })
