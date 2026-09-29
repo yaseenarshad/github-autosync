@@ -40,6 +40,14 @@ export function attentionPrompt(f: FolderStatus, a: Attention): string {
         '(use my GitHub account\'s name and email — ask me if you\'re not sure), then confirm with "git config --global --list".'
       )
     case 'busy-repo':
+      if (a.detail === 'side-branch') {
+        return (
+          `In ${where(f)}, git is on the branch "${f.branch ?? 'unknown'}" instead of the repo's main branch. ` +
+          'This repo only takes changes through pull requests, so GitHub AutoSync only syncs its main branch and won\'t touch this one. ' +
+          'Look at "git status" and "git log", make sure nothing on this branch gets lost (ask me what to do with any work that is only here), ' +
+          'then switch back to the main branch ("git remote show origin" names it) and leave the folder with a clean status.'
+        )
+      }
       if (a.detail === 'detached') {
         return (
           `In ${where(f)}, git is in "detached HEAD" (not on a branch), so GitHub AutoSync won't touch it. ` +
@@ -52,6 +60,29 @@ export function attentionPrompt(f: FolderStatus, a: Attention): string {
         `Look at "git status", then either finish the ${a.detail === 'merge' ? 'merge' : 'rebase'} or abort it safely — without losing any changes — ` +
         'and leave the folder on its branch with a clean status.'
       )
+    case 'no-gh':
+      return (
+        `In ${where(f)}, the GitHub repo only takes changes through pull requests, and GitHub AutoSync opens them with the GitHub CLI (gh), ` +
+        'which is missing or not logged in on this computer' +
+        (a.detail ? `:\n${a.detail}\n\n` : '. ') +
+        `${GH_LOGIN} Confirm with "gh auth status".`
+      )
+    case 'pr-closed':
+      return (
+        `In ${where(f)}, GitHub AutoSync sent my changes as a pull request, and someone closed it on GitHub without merging it` +
+        (a.detail ? ` (${a.detail}). ` : '. ') +
+        'The changes are still safe in this folder. Look at it with the GitHub CLI ("gh pr view <link> --comments"), find out why it was closed and tell me. ' +
+        'If the changes should go in, reopen it ("gh pr reopen <link>") so the repo merges it, or tell me to press "Send again" in GitHub AutoSync to open a fresh one. ' +
+        "Don't delete, reset or discard anything."
+      )
+    case 'other-app': {
+      const app = a.detail ?? 'Docs'
+      return (
+        `The ${app} app and GitHub AutoSync both sync ${where(f)}. Only one app should sync a folder, so GitHub AutoSync is standing back and changing nothing. ` +
+        `Tell me how to turn one of them off: GitHub sync for this folder in the ${app} app, or this folder's switch in GitHub AutoSync. ` +
+        "Don't change any files or git settings yourself."
+      )
+    }
     case 'error':
       return (
         `GitHub AutoSync hit a git error in ${where(f)}` +

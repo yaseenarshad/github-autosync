@@ -84,6 +84,7 @@ export function registerIpc(deps: IpcDeps): void {
     setFolderEnabled: async (id, enabled) => change((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? { ...f, enabled } : f)) })),
     setPaused: async (paused) => change((c) => ({ ...c, paused })),
     syncNow: (id) => manager.syncNow(id),
+    resendPullRequest: (id) => manager.resend(id),
     activity: async (id, cursor) => readActivity(folderPath(id), deps.status().hostname, cursor),
     setLaunchAtLogin: async (on) => change((c) => ({ ...c, launchAtLogin: on })),
     setTheme: async (theme) => change((c) => ({ ...c, theme })),

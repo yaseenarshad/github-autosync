@@ -1,10 +1,10 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.ts; changes: GIT_EDITOR=true, `findGit`, no stdin `input`, failure classification moved here from sync.ts (+ identity).
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.ts; changes: GIT_EDITOR=true, `findGit`, no stdin `input`, failure classification moved here from sync.ts (+ identity), extra `env` (gh, D28).
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
 /**
- * Git runner — the one place this app starts a child process.
+ * Git runner — the one place this app starts a child process (`gh` runs through it too, D28).
  *
  * A packaged app has no developer `PATH`, so the binary is an EXPLICIT absolute path picked from a
  * fixed candidate list (never a `PATH` lookup), `execFile` runs it with no shell, and the caller
@@ -92,7 +92,7 @@ export async function findGit(candidates: readonly string[] = GIT_CANDIDATES): P
  * `GIT_TIMEOUT_CODE` and a `timed out` line in stderr, so a wedged git looks like any other
  * classifiable failure.
  */
-export function git(bin: string, root: string, args: string[], opts: { timeoutMs?: number } = {}): Promise<GitResult> {
+export function git(bin: string, root: string, args: string[], opts: { timeoutMs?: number; env?: Record<string, string> } = {}): Promise<GitResult> {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return new Promise((resolve, reject) => {
     execFile(
@@ -110,7 +110,7 @@ export function git(bin: string, root: string, args: string[], opts: { timeoutMs
         // calls (`status`) from writing the index, so a status read never fights the user's own
         // terminal for `.git/index.lock`. GIT_EDITOR=true: a background app has no one to type a
         // message, so `rebase --continue` takes the one it has (and beats a user's own GIT_EDITOR).
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_EDITOR: 'true' },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_EDITOR: 'true', ...opts.env },
       },
       (err, stdout, stderr) => {
         if (err === null) {
