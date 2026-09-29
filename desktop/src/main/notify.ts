@@ -37,7 +37,15 @@ function attentionBody(attention: Attention): string {
     case 'no-identity':
       return 'git needs your name and email before it can save changes.'
     case 'busy-repo':
-      return attention.detail === 'detached' ? 'This repo is on a detached HEAD. Syncing is waiting.' : `A ${attention.detail ?? 'git operation'} is in progress. Syncing is waiting.`
+      if (attention.detail === 'detached') return 'This repo is on a detached HEAD. Syncing is waiting.'
+      if (attention.detail === 'side-branch') return 'This repo takes changes through pull requests, and this is not its main branch. Syncing is waiting.'
+      return `A ${attention.detail ?? 'git operation'} is in progress. Syncing is waiting.`
+    case 'no-gh':
+      return 'Needs GitHub CLI to open pull requests. Syncing has stopped.'
+    case 'pr-closed':
+      return 'Its pull request was closed without merging. Syncing is waiting for you.'
+    case 'other-app':
+      return `Also synced by the ${attention.detail ?? 'other'} app, so AutoSync leaves it alone.`
     case 'error':
       return `Syncing has stopped: ${attention.detail ?? 'git failed'}`
   }
@@ -58,7 +66,8 @@ export function createNoticeRules(): (status: AppStatus, now: number) => Notice[
     mem.kind = kind
     mem.copies = copies
     if (f.pendingSince !== null && now - f.pendingSince >= PENDING_NOTICE_MS && mem.pendingSince !== f.pendingSince) {
-      out.push({ folderId: f.id, title: f.name, body: 'Changes on this computer have not reached GitHub for over an hour.' })
+      const body = f.pr !== null ? `Pull request #${f.pr.number} has been waiting to merge for over an hour.` : 'Changes on this computer have not reached GitHub for over an hour.'
+      out.push({ folderId: f.id, title: f.name, body })
       mem.pendingSince = f.pendingSince
     }
     return out

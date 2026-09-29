@@ -1,6 +1,7 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.test.ts; changes: registry folders + pause instead of vault configs, AutoSync status fields (sendAt, retryAt, pendingSince, direction), peek, flush follow-up.
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.test.ts; changes: registry folders + pause instead of vault configs, AutoSync status fields (sendAt, retryAt, pendingSince, direction), peek, flush follow-up, PR mode.
 import { describe, expect, it } from 'vitest'
 import type { FileChange, FolderStatus } from '@shared/types'
+import type { RepoPolicy } from './github'
 import { createSyncManager, type FolderConfig, type SyncHost, type SyncManager } from './manager'
 import type { PassResult } from './sync'
 
@@ -33,6 +34,8 @@ function result(over: Partial<PassResult> = {}, pending: FileChange[] = []): Pas
     tooBig: [],
     alsoSyncedBy: null,
     facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, ignored: { patterns: [], count: 0 }, conflicts: [] },
+    policy: null,
+    pr: null,
     ...over,
   }
 }
@@ -40,6 +43,10 @@ function result(over: Partial<PassResult> = {}, pending: FileChange[] = []): Pas
 interface Harness {
   manager: SyncManager
   passes: Array<{ root: string; flush: boolean }>
+  /** What each pass was told beyond `flush`: the rules it may assume and whether it may send. */
+  given: Array<{ policy: RepoPolicy | null; publish: boolean }>
+  /** `forgetInFlight` calls, with how many passes had run by then. */
+  forgotten: Array<{ root: string; afterPasses: number }>
   /** Every folder status the manager reported, in order (one snapshot per `onChange`). */
   seen: FolderStatus[]
   watching: () => number
@@ -48,7 +55,7 @@ interface Harness {
   status: () => FolderStatus
 }
 
-interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs' | 'ownWritesMs'>> {
+interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs' | 'ownWritesMs' | 'prQuietMs' | 'prCheckMs'>> {
   /** `n` is the 1-based pass count. */
   pass?: (n: number, onDirection: (d: 'up' | 'down') => void) => Promise<PassResult>
   /** What `git status` finds after a watcher event; by default the event was a real edit. */
@@ -59,6 +66,8 @@ const EDIT: FileChange[] = [{ status: 'M', path: 'note.md' }]
 
 function harness(opts: Opts = {}): Harness {
   const passes: Array<{ root: string; flush: boolean }> = []
+  const given: Harness['given'] = []
+  const forgotten: Harness['forgotten'] = []
   const seen: FolderStatus[] = []
   const listeners = new Set<() => void>()
   let peeks = 0
@@ -67,11 +76,15 @@ function harness(opts: Opts = {}): Harness {
   const host: SyncHost = {
     sync: async (root, o) => {
       passes.push({ root, flush: o.flush })
+      given.push({ policy: o.policy, publish: o.publish })
       return opts.pass === undefined ? result() : opts.pass(passes.length, o.onDirection)
     },
     peek: async () => {
       peeks += 1
       return opts.peek === undefined ? EDIT : opts.peek()
+    },
+    forgetInFlight: async (root) => {
+      forgotten.push({ root, afterPasses: passes.length })
     },
     watch: (_root, onEvent) => {
       listeners.add(onEvent)
@@ -87,11 +100,15 @@ function harness(opts: Opts = {}): Harness {
     wakeCooldownMs: opts.wakeCooldownMs ?? NEVER,
     peekMs: opts.peekMs ?? 1,
     ownWritesMs: opts.ownWritesMs ?? 0,
+    prQuietMs: opts.prQuietMs ?? NEVER,
+    prCheckMs: opts.prCheckMs ?? NEVER,
   }
   manager = createSyncManager(host)
   return {
     manager,
     passes,
+    given,
+    forgotten,
     seen,
     watching: () => listeners.size,
     emit: () => {
@@ -460,5 +477,110 @@ describe('flushForQuit', () => {
     g.release()
     await flushed
     expect(h.passes.map((p) => p.flush)).toEqual([false, true])
+  })
+})
+
+describe('PR mode (D22, D24, D26)', () => {
+  const RULES: RepoPolicy = { defaultBranch: 'main', requiresPr: true }
+  const PR = { number: 1, url: 'https://github.com/yaseen/notes/pull/1' }
+
+  it('hands every pass the last known rules; only a successful read replaces them, and off forgets them', async () => {
+    const answers = [result({ policy: RULES }), result({ policy: null })]
+    const h = harness({ pass: async (n) => answers[n - 1] ?? result() })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    await h.manager.syncNow('a')
+    await h.manager.syncNow('a')
+    expect(h.given.map((g) => g.policy)).toEqual([null, RULES, RULES])
+    expect(h.status().publishVia).toBe('pr')
+
+    h.manager.setFolders([{ ...A, enabled: false }], false)
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 4)
+    expect(h.given[3]?.policy).toBeNull()
+  })
+
+  it('is push mode on any branch but the one the rules govern', async () => {
+    const h = harness({ pass: async () => result({ policy: RULES, facts: { branch: 'dev', remoteUrl: null, pending: [], ignored: { patterns: [], count: 0 }, conflicts: [] } }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    expect(h.status().publishVia).toBe('push')
+  })
+
+  it('quiet passes may not send; every other pass may', async () => {
+    const h = harness({ pollMs: 10 })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length >= 2)
+    h.manager.setFolders([], false)
+    expect(h.given.slice(0, 2).map((g) => g.publish)).toEqual([true, false])
+  })
+
+  it('waits `prQuietMs` after an edit, not `quietMs`', async () => {
+    const h = harness({ quietMs: 10, pass: async () => result({ policy: RULES }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    await until(() => h.status().state === 'pending')
+    expect(h.status().sendAt).toBeGreaterThan(Date.now() + 1000)
+    await sleep(60)
+    expect(h.passes).toHaveLength(1)
+  })
+
+  it('while a PR is open: pending with its PR, checked quietly every `prCheckMs`, and no idle poll', async () => {
+    const open = result({ level: false, policy: RULES, pr: PR }, EDIT)
+    const answers = [open, open, result({ policy: RULES })]
+    const h = harness({ prCheckMs: 10, pass: async (n) => answers[n - 1] ?? result() })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 3 && h.status().state === 'synced')
+    expect(h.seen.filter((s) => s.state === 'pending').map((s) => s.pr)).toContainEqual(PR)
+    expect(h.given.map((g) => g.publish)).toEqual([true, false, false])
+    expect(h.status().pr).toBeNull()
+    await sleep(40)
+    expect(h.passes).toHaveLength(3) // merged and level: back to the (parked) idle poll
+
+    const idle = harness({ pollMs: 5, pass: async () => open })
+    idle.manager.setFolders([A], false)
+    await sleep(60)
+    expect(idle.passes).toHaveLength(1)
+    expect(idle.status()).toMatchObject({ state: 'pending', pr: PR })
+    idle.manager.setFolders([], false)
+  })
+
+  it('an edit while a PR is open does not stop its check: the batch still lands on time', async () => {
+    const open = result({ level: false, policy: RULES, pr: PR }, EDIT)
+    const answers = [open, open]
+    const h = harness({ prCheckMs: 20, pass: async (n) => answers[n - 1] ?? result({ policy: RULES }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1)
+    await sleep(5)
+    h.emit()
+    await until(() => h.passes.length >= 3)
+    h.manager.setFolders([], false)
+    expect(h.given.slice(0, 3).map((g) => g.publish)).toEqual([true, false, false])
+  })
+
+  it('a quiet pass that landed a batch but could not send it arms the send', async () => {
+    const answers = [result({ policy: RULES }), result({ level: false, policy: RULES }, EDIT)]
+    const h = harness({ pollMs: 5, prQuietMs: 20, pass: async (n) => answers[n - 1] ?? result({ policy: RULES }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length >= 3)
+    h.manager.setFolders([], false)
+    expect(h.given.slice(0, 3).map((g) => g.publish)).toEqual([true, false, true])
+  })
+
+  it('resend forgets the closed batch, then runs a normal pass; an inactive folder is a no-op', async () => {
+    const h = harness()
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    await h.manager.resend('a')
+    expect(h.forgotten).toEqual([{ root: A.path, afterPasses: 1 }])
+    expect(h.passes).toHaveLength(2)
+    expect(h.given[1]?.publish).toBe(true)
+
+    h.manager.setFolders([{ ...A, enabled: false }], false)
+    await h.manager.resend('a')
+    await h.manager.resend('nope')
+    expect(h.forgotten).toHaveLength(1)
+    expect(h.passes).toHaveLength(2)
   })
 })

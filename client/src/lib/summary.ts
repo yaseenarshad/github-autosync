@@ -27,7 +27,14 @@ function attentionShort(a: Attention): string {
     case 'no-identity':
       return 'Git name & email missing'
     case 'busy-repo':
+      if (a.detail === 'side-branch') return 'On a side branch'
       return a.detail === 'detached' ? 'Not on a branch' : a.detail === 'merge' ? 'Merge in progress' : 'Rebase in progress'
+    case 'no-gh':
+      return 'GitHub CLI not set up'
+    case 'pr-closed':
+      return 'PR closed · not merged'
+    case 'other-app':
+      return 'Two apps sync this'
     case 'error':
       return 'Sync error'
   }
@@ -50,6 +57,9 @@ export function folderView(f: FolderStatus, app: Globals): FolderView {
   const n = f.pending.length
   if (f.offline) {
     return { kind: 'offline', cls: f.state, short: n ? `Offline · ${n} waiting` : 'Offline', head: "You're offline", icon: 'wifi-off' }
+  }
+  if (f.state === 'pending' && f.pr) {
+    return { kind: 'pending', cls: 'pending', short: `Waiting on PR #${f.pr.number}`, head: 'Your changes are in a pull request', icon: 'clock' }
   }
   if (f.state === 'pending') {
     return { kind: 'pending', cls: 'pending', short: `${n} waiting`, head: `${plural(n, 'change')} waiting to send`, icon: 'clock' }

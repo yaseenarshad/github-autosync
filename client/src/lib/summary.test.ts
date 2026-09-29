@@ -22,6 +22,13 @@ describe('folderView headline', () => {
     ],
     ['auth', makeFolder({ state: 'attention', attention: { kind: 'auth' } }), 'Not syncing until this is fixed', 'GitHub sign-in failed'],
     ['off', makeFolder({ enabled: false, state: 'off' }), 'Sync is off for this folder', 'Sync off'],
+    [
+      'waiting on a PR',
+      makeFolder({ state: 'pending', publishVia: 'pr', pr: { number: 12, url: 'https://github.com/yasin/notes/pull/12' }, pending: [change] }),
+      'Your changes are in a pull request',
+      'Waiting on PR #12',
+    ],
+    ['PR not opened yet', makeFolder({ state: 'pending', publishVia: 'pr', pending: [change] }), '1 change waiting to send', '1 waiting'],
   ])('%s', (_, folder, head, short) => {
     expect(folderView(folder, ok)).toMatchObject({ head, short })
   })
@@ -38,6 +45,10 @@ describe('folderView headline', () => {
     [{ kind: 'busy-repo', detail: 'rebase' }, 'Rebase in progress'],
     [{ kind: 'busy-repo', detail: 'merge' }, 'Merge in progress'],
     [{ kind: 'busy-repo', detail: 'detached' }, 'Not on a branch'],
+    [{ kind: 'busy-repo', detail: 'side-branch' }, 'On a side branch'],
+    [{ kind: 'no-gh' }, 'GitHub CLI not set up'],
+    [{ kind: 'pr-closed', detail: 'https://github.com/yasin/notes/pull/7' }, 'PR closed · not merged'],
+    [{ kind: 'other-app', detail: 'Docs' }, 'Two apps sync this'],
     [{ kind: 'no-identity' }, 'Git name & email missing'],
     [{ kind: 'error', detail: 'fatal: bad object' }, 'Sync error'],
   ])('short text for %o', (attention, short) => {

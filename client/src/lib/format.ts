@@ -22,3 +22,8 @@ export function parentDir(path: string): string {
 export function webLabel(webUrl: string): string {
   return webUrl.replace(/^https:\/\//, '')
 }
+
+/** `openExternal` only opens GitHub pages, so only those render as links. */
+export function isGitHubUrl(url: string): boolean {
+  return url.startsWith('https://github.com/')
+}

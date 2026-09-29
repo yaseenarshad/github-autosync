@@ -15,6 +15,16 @@
 - `.gitignore` is the only filter.
 - Settings live in the app's own `config.json` (macOS: `~/Library/Application Support/GitHub AutoSync/`); nothing is written into your folders.
 
+## Team repos that require pull requests
+
+- When a repo only takes changes into its main branch through pull requests, AutoSync sends each editing sitting as one pull request (PR), opened 5 minutes after your last edit.
+- The repo's own GitHub Action merges the PR; AutoSync then brings it back to your folder. The folder turns green once your changes are in main.
+- Other folders keep pushing straight to their branch, as before.
+- Setup, once per computer: install the GitHub CLI (`brew install gh`), run `gh auth login` and `gh auth setup-git`, then **Add folder** as usual.
+- One folder, one syncer: if the Docs or Draw app also syncs the folder, AutoSync waits and changes nothing until one of them is turned off.
+- Only the main branch syncs. On a side branch, AutoSync leaves the folder alone until you switch back.
+- Don't use a repo's own manual `publish` helper on a folder AutoSync syncs — let AutoSync open the PRs.
+
 ## Dev
 
 - Requires Node.js 22+ and npm.

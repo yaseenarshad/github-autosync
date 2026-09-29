@@ -89,14 +89,16 @@ describe('5B: failure proofs', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(await r.run(['rev-parse', 'HEAD'])).toBe(head)
   })
 
-  it('Docs syncing the same folder: warned about, and still synced', async () => {
+  it('Docs syncing the same folder: AutoSync stands back and says so (D27)', async () => {
     const { repo: r, remote } = await repo()
+    const before = await remoteHead(r, remote)
     await r.write('.yaseendocs/github.json', '{"enabled":true}')
     await r.write('doc.md', 'hello\n')
 
     const { status } = await start(r.root)
 
-    expect(status()).toMatchObject({ state: 'synced', alsoSyncedBy: 'Docs' })
-    expect(await remoteHead(r, remote)).toBe(await r.run(['rev-parse', 'HEAD']))
+    expect(status()).toMatchObject({ state: 'attention', attention: { kind: 'other-app', detail: 'Docs' }, alsoSyncedBy: 'Docs' })
+    expect(await r.run(['rev-parse', 'HEAD'])).toBe(before)
+    expect(await remoteHead(r, remote)).toBe(before)
   })
 })

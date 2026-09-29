@@ -21,6 +21,8 @@ export interface AutoSyncApi {
   setPaused(paused: boolean): Promise<AppStatus>
   /** One folder, or every enabled folder when null. */
   syncNow(id: string | null): Promise<void>
+  /** D25 "Send again": forget a batch whose PR a human closed, then send it as a fresh PR. */
+  resendPullRequest(id: string): Promise<void>
   /** Newest first; pass the returned cursor to page back. */
   activity(id: string, cursor?: number): Promise<ActivityPage>
   setLaunchAtLogin(on: boolean): Promise<AppStatus>

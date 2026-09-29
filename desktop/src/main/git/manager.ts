@@ -1,8 +1,9 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode.
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode, PR mode (D24, D26).
 import path from 'node:path'
-import { DEBOUNCE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, WAKE_COOLDOWN_MS } from '@shared/status'
-import type { Attention, FileChange, FolderStatus, OtherApp, SyncState, TooBigFile } from '@shared/types'
+import { DEBOUNCE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
+import type { Attention, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, SyncState, TooBigFile } from '@shared/types'
 import { webUrlOf } from './detect'
+import type { RepoPolicy } from './github'
 import type { PassResult } from './sync'
 
 /**
@@ -29,6 +30,10 @@ import type { PassResult } from './sync'
  *     settle (their pass is coming), never after a failure (the retry, or the user, owns that).
  *     Conflict copies do not stop it: keep-both already settled the conflict.
  *   - QUIT flushes: commit and a short-capped push, no fetch.
+ *   - PR MODE (the repo's rules say so, D22): the debounce is `prQuietMs` (5 min) — one PR per
+ *     sitting, not per save — and a quiet pass never sends (D24). While a batch's PR is open the
+ *     folder is pending, and a quiet check (`prCheckMs`, 15 s) replaces the idle poll until it
+ *     merges. The rules are read once and kept here; only a successful read replaces them.
  *
  * Two invariants everything else is built to protect:
  *   - ONE pass at a time per folder, and a burst of triggers during a running pass collapses into
@@ -52,7 +57,9 @@ type PassMode = 'quiet' | 'normal' | 'flush'
 const MODE_RANK: Record<PassMode, number> = { quiet: 0, normal: 1, flush: 2 }
 
 export interface SyncHost {
-  sync(root: string, opts: { flush: boolean; onDirection: (direction: 'up' | 'down') => void }): Promise<PassResult>
+  sync(root: string, opts: { flush: boolean; policy: RepoPolicy | null; publish: boolean; onDirection: (direction: 'up' | 'down') => void }): Promise<PassResult>
+  /** D25 "Send again": forget the batch whose PR was closed. */
+  forgetInFlight(root: string): Promise<void>
   /** The pending list alone; null when it cannot be read. */
   peek(root: string): Promise<FileChange[] | null>
   watch(root: string, onEvent: () => void): () => void
@@ -63,6 +70,8 @@ export interface SyncHost {
   wakeCooldownMs?: number
   peekMs?: number
   ownWritesMs?: number
+  prQuietMs?: number
+  prCheckMs?: number
 }
 
 export interface SyncManager {
@@ -73,6 +82,8 @@ export interface SyncManager {
   syncNow(id: string | null): Promise<void>
   notifyWake(): void
   flushForQuit(): Promise<void>
+  /** D25: send a batch whose PR a human closed again, as a fresh PR; resolves when the pass is done. */
+  resend(id: string): Promise<void>
 }
 
 type Timer = ReturnType<typeof setTimeout>
@@ -114,6 +125,9 @@ interface Entry {
   alsoSyncedBy: OtherApp | null
   lastSyncedAt: number | null
   lastCheckedAt: number | null
+  /** The repo's rules, last known; null until read, and forgotten when the folder turns off. */
+  policy: RepoPolicy | null
+  pr: PullRequestRef | null
 }
 
 /** Unref'd: a sync timer must never be the reason the app won't quit — `flushForQuit` is what lands the last change. */
@@ -156,6 +170,8 @@ function fresh(cfg: FolderConfig): Entry {
     alsoSyncedBy: null,
     lastSyncedAt: null,
     lastCheckedAt: null,
+    policy: null,
+    pr: null,
   }
 }
 
@@ -163,9 +179,12 @@ function stateOf(e: Entry): SyncState {
   if (!e.active) return 'off'
   if (e.syncing) return 'syncing'
   if (e.attention !== null) return 'attention'
-  if (e.sendAt !== null || e.offline || e.pending.length > 0) return 'pending'
+  if (e.sendAt !== null || e.offline || e.pending.length > 0 || e.pr !== null) return 'pending'
   return 'synced'
 }
+
+/** D22/D29: PR mode is the rules' call, and only on the branch they govern. */
+const publishVia = (e: Entry): PublishVia => (e.policy?.requiresPr === true && e.branch === e.policy.defaultBranch ? 'pr' : 'push')
 
 function toStatus(e: Entry): FolderStatus {
   return {
@@ -180,6 +199,8 @@ function toStatus(e: Entry): FolderStatus {
     branch: e.branch,
     remoteUrl: e.remoteUrl,
     webUrl: webUrlOf(e.remoteUrl),
+    publishVia: publishVia(e),
+    pr: e.pr,
     pending: e.pending,
     tooBig: e.tooBig,
     ignored: e.ignored,
@@ -211,6 +232,8 @@ function apply(e: Entry, res: PassResult): void {
   e.attention = res.attention
   e.offline = res.offline
   e.alsoSyncedBy = res.alsoSyncedBy
+  e.pr = res.pr
+  if (res.policy !== null) e.policy = res.policy
   if (res.facts !== null) {
     e.branch = res.facts.branch
     e.remoteUrl = res.facts.remoteUrl
@@ -223,7 +246,7 @@ function apply(e: Entry, res: PassResult): void {
 
 /** A host that throws is classified like any other failure — a rejection would take out a timer's `void` call. */
 function crashed(err: unknown): PassResult {
-  return { attention: { kind: 'error', detail: String(err) }, offline: false, fetched: false, level: false, tooBig: [], alsoSyncedBy: null, facts: null }
+  return { attention: { kind: 'error', detail: String(err) }, offline: false, fetched: false, level: false, tooBig: [], alsoSyncedBy: null, facts: null, policy: null, pr: null }
 }
 
 export function createSyncManager(host: SyncHost): SyncManager {
@@ -233,6 +256,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
   const wakeCooldownMs = host.wakeCooldownMs ?? WAKE_COOLDOWN_MS
   const peekMs = host.peekMs ?? PEEK_MS
   const ownWritesMs = host.ownWritesMs ?? OWN_WRITES_MS
+  const prQuietMs = host.prQuietMs ?? PR_QUIET_MS
+  const prCheckMs = host.prCheckMs ?? PR_CHECK_MS
 
   /** Registry order. */
   let entries = new Map<string, Entry>()
@@ -272,6 +297,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
     const res = await host
       .sync(e.cfg.path, {
         flush: mode === 'flush',
+        policy: e.policy,
+        publish: mode !== 'quiet',
         onDirection: (direction) => {
           if (mode === 'quiet' || !current(e)) return
           e.direction = direction
@@ -292,9 +319,13 @@ export function createSyncManager(host: SyncHost): SyncManager {
             void requestPass(e, 'normal')
           })
         }
-        // Level, yet something is pending: the user saved while the pass ran.
-        if (res.level && e.pending.length > 0) armDebounce(e)
-        else if (res.level) armPoll(e)
+        // Conflict copies never stop syncing; any other attention, or offline, leaves the next move to the retry or the user.
+        const stopped = res.offline || (res.attention !== null && res.attention.kind !== 'conflict')
+        // D26: a batch is out — check back soon whether it merged, instead of idling.
+        if (res.pr !== null) armPoll(e, prCheckMs)
+        // Something left to send: saved while the pass ran, or a quiet pass landed a batch it may not send (D24).
+        else if (!stopped && e.pending.length > 0) armDebounce(e)
+        else if (res.level) armPoll(e, pollMs)
       }
       host.onChange()
     }
@@ -307,19 +338,27 @@ export function createSyncManager(host: SyncHost): SyncManager {
     else void runPass(e, follow.mode).then(follow.resolve)
   }
 
-  /** Sends in `quietMs`, pushed back by every call — and the idle poll stands down: the send is coming. */
+  /**
+   * Sends in `quietMs` (`prQuietMs` in PR mode), pushed back by every call — and the idle poll stands
+   * down: the send is coming. An open PR's check keeps running: it lands the batch whatever the user types.
+   */
   function armDebounce(e: Entry): void {
-    for (const timer of [e.debounce, e.poll]) if (timer !== null) clearTimeout(timer)
-    e.poll = null
-    e.sendAt = Date.now() + quietMs
-    e.debounce = arm(quietMs, () => {
+    if (e.debounce !== null) clearTimeout(e.debounce)
+    if (e.pr === null && e.poll !== null) {
+      clearTimeout(e.poll)
+      e.poll = null
+    }
+    const ms = publishVia(e) === 'pr' ? prQuietMs : quietMs
+    e.sendAt = Date.now() + ms
+    e.debounce = arm(ms, () => {
       e.debounce = e.sendAt = null
       void requestPass(e, 'normal')
     })
   }
 
-  function armPoll(e: Entry): void {
-    e.poll = arm(pollMs, () => {
+  /** A quiet pass in `ms`: the idle pull, or the check on an open PR. */
+  function armPoll(e: Entry, ms: number): void {
+    e.poll = arm(ms, () => {
       e.poll = null
       void requestPass(e, 'quiet')
     })
@@ -344,7 +383,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
             // Undone before it was sent: nothing to send, so back to idling.
             clearTimeout(e.debounce)
             e.debounce = e.sendAt = null
-            armPoll(e)
+            if (e.poll === null) armPoll(e, pollMs)
           }
           host.onChange()
         })
@@ -360,6 +399,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
   /** Watcher closed and every timer cleared. A pass already running finishes, but arms nothing and runs no follow-up. */
   function deactivate(e: Entry): void {
     e.active = false
+    e.policy = null
     clearTimers(e)
     e.unwatch?.()
     e.unwatch = null
@@ -409,6 +449,14 @@ export function createSyncManager(host: SyncHost): SyncManager {
         jobs.push(requestPass(e, 'flush'))
       }
       await Promise.all(jobs)
+    },
+
+    async resend(id) {
+      const e = entries.get(id)
+      if (e === undefined || !e.active) return
+      // No need to wait out a running pass: one that finds the PR closed writes nothing.
+      await host.forgetInFlight(e.cfg.path)
+      await requestPass(e, 'normal')
     },
   }
 }

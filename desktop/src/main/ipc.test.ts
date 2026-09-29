@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { isGithubUrl, terminalCommand, throttle, vscodeUrl } from './ipc'
+import { ipcMain } from 'electron'
+import { describe, expect, it, vi } from 'vitest'
+import { channel } from '../channels'
+import type { SyncManager } from './git/manager'
+import { isGithubUrl, registerIpc, terminalCommand, throttle, vscodeUrl, type IpcDeps } from './ipc'
+
+// Only the handler table is under test; nothing here opens a dialog or a window.
+vi.mock('electron', () => ({ ipcMain: { handle: vi.fn() }, clipboard: {}, dialog: {}, Menu: {}, shell: {} }))
 
 describe('isGithubUrl', () => {
   it('opens GitHub pages and nothing else', () => {
@@ -43,5 +49,17 @@ describe('terminalCommand', () => {
 
   it('opens a new console already in the folder on Windows', () => {
     expect(terminalCommand('win32', 'C:\\My Notes')).toEqual({ file: 'cmd.exe', args: ['/c', 'start', '""', 'cmd.exe', '/K', 'cd /d "C:\\My Notes"'], verbatim: true })
+  })
+})
+
+describe('registerIpc', () => {
+  it('routes resendPullRequest to the manager (D25)', async () => {
+    const resend = vi.fn(async (_id: string) => undefined)
+    const deps = { manager: { resend } as unknown as SyncManager } as IpcDeps
+    registerIpc(deps)
+    const handler = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === channel('resendPullRequest'))?.[1]
+    expect(channel('resendPullRequest')).toBe('autosync:resendPullRequest')
+    await handler?.({} as Electron.IpcMainInvokeEvent, 'notes')
+    expect(resend).toHaveBeenCalledWith('notes')
   })
 })

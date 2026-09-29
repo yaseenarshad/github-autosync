@@ -74,6 +74,12 @@ describe('trayTemplate', () => {
     expect(a.quit).toHaveBeenCalledOnce()
   })
 
+  it('a batch waiting on its PR is Waiting; a closed PR needs you (D26)', () => {
+    const status = makeStatus([f('Alpha', 'pending', { publishVia: 'pr', pr: { number: 1, url: 'https://github.com/yasin/notes/pull/1' } }), f('Beta', 'attention', { attention: { kind: 'pr-closed' } })])
+    expect(labels(trayTemplate(status, actions()))).toEqual(expect.arrayContaining(['● Alpha — Waiting', '● Beta — Needs you']))
+    expect(trayState(status)).toBe('attention')
+  })
+
   it('shows off folders as paused while paused, and disables Sync all now', () => {
     const items = trayTemplate(makeStatus([f('Alpha', 'off')], { paused: true }), actions())
     expect(labels(items)).toContain('● Alpha — Paused')
