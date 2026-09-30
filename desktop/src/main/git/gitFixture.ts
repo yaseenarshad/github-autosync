@@ -1,9 +1,11 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/gitFixture.ts; changes: realpath'd temp dirs, `clone` helper, byte snapshot, no storage-worker bundle.
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/gitFixture.ts; changes: realpath'd temp dirs, `clone` helper, byte snapshot, no storage-worker bundle, `fakeGitHub` (PR publishing), `forgetInFlight` on the host.
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { GIT_CANDIDATES, git, resolveGit } from './exec'
+import { GIT_CANDIDATES, git, resolveBin } from './exec'
+import type { GitHub, GitHubRepo, GhFailure, PullRequest, RepoPolicy } from './github'
 import type { SyncHost } from './manager'
+import { forgetInFlight } from './pullRequest'
 import { peekPending, syncFolder } from './sync'
 
 /**
@@ -39,7 +41,7 @@ export const REAL_GIT_TIMEOUT_MS = 20_000
 
 /** The machine's git, or a clear failure — these tests cannot run without one. */
 export async function requireGit(): Promise<string> {
-  const bin = await resolveGit()
+  const bin = await resolveBin()
   if (bin === null) throw new Error(`no git found at ${GIT_CANDIDATES.join(' or ')}; the git tests need a real one`)
   return bin
 }
@@ -155,6 +157,7 @@ export function gitHost(host: string, over: Partial<SyncHost> = {}): SyncHost {
   return {
     sync: (root, opts) => syncFolder(root, { ...opts, host }),
     peek: (root) => peekPending(root),
+    forgetInFlight,
     watch: () => () => undefined,
     onChange: () => undefined,
     quietMs: never,
@@ -163,5 +166,108 @@ export function gitHost(host: string, over: Partial<SyncHost> = {}): SyncHost {
     wakeCooldownMs: never,
     peekMs: never,
     ...over,
+  }
+}
+
+interface FakePr {
+  number: number
+  head: string
+  base: string
+  title: string
+  body: string
+  state: PullRequest['state']
+}
+
+export interface FakeGitHub extends GitHub {
+  /** Every PR ever opened, oldest first. */
+  prs: () => ReadonlyArray<Readonly<FakePr>>
+  /** The repo's Action: squash-merge PR `n` into its base as `<title> (#n)` and delete its branch. False on a conflict. */
+  merge: (n: number) => Promise<boolean>
+  /** A human closing PR `n` without merging. */
+  closeByHuman: (n: number) => void
+  /** What the rules say from now on. */
+  setPolicy: (policy: RepoPolicy) => void
+  /** Every call fails like this until reset with null (`no-gh`, `offline`…). */
+  failWith: (failure: GhFailure | null) => void
+}
+
+/**
+ * GitHub for one bare remote, in-process: PRs are records, merging is a real `merge --squash` pushed
+ * into the bare repo, and `mergeable` is computed live with `merge-tree` the way GitHub would.
+ */
+export async function fakeGitHub(remote: BareRemote, policy: RepoPolicy = { defaultBranch: 'main', requiresPr: true }): Promise<FakeGitHub> {
+  const bin = await requireGit()
+  const list: FakePr[] = []
+  let rules = policy
+  let failure: GhFailure | null = null
+  const url = (n: number) => `https://github.com/acme/notes/pull/${n}`
+  const onRemote = (args: string[]) => git(bin, remote.url, args)
+
+  async function mergeable(pr: FakePr): Promise<PullRequest['mergeable']> {
+    const res = await onRemote(['merge-tree', '--write-tree', pr.base, pr.head])
+    // 1 is a conflict; anything else (an old git without `--write-tree`, a missing ref) is a broken fixture, not an answer.
+    if (res.code !== 0 && res.code !== 1) throw new Error(`git merge-tree --write-tree exited ${res.code}: ${res.stderr.trim()}`)
+    return res.code === 0 ? 'MERGEABLE' : 'CONFLICTING'
+  }
+
+  const view = async (pr: FakePr): Promise<PullRequest> => ({ number: pr.number, url: url(pr.number), state: pr.state, mergeable: pr.state === 'OPEN' ? await mergeable(pr) : 'UNKNOWN' })
+
+  const repo: GitHubRepo = {
+    policy: async () => (failure ? { ok: false, failure } : { ok: true, value: rules }),
+    findPr: async (branch) => {
+      if (failure) return { ok: false, failure }
+      const pr = [...list].reverse().find((p) => p.head === branch)
+      return { ok: true, value: pr === undefined ? null : await view(pr) }
+    },
+    createPr: async ({ head, base, title, body }) => {
+      if (failure) return { ok: false, failure }
+      if ((await onRemote(['rev-parse', '--verify', '-q', `refs/heads/${head}`])).code !== 0) return { ok: false, failure: { kind: 'error', detail: `head branch ${head} does not exist` } }
+      if (list.some((p) => p.head === head && p.state === 'OPEN')) return { ok: false, failure: { kind: 'error', detail: `a pull request for branch "${head}" already exists` } }
+      const pr: FakePr = { number: list.length + 1, head, base, title, body, state: 'OPEN' }
+      list.push(pr)
+      return { ok: true, value: await view(pr) }
+    },
+    closePr: async (n) => {
+      if (failure) return { ok: false, failure }
+      const pr = list[n - 1]
+      if (pr === undefined || pr.state !== 'OPEN') return { ok: false, failure: { kind: 'error', detail: `pull request #${n} is not open` } }
+      pr.state = 'CLOSED'
+      await onRemote(['branch', '-D', pr.head])
+      return { ok: true, value: undefined }
+    },
+  }
+
+  return {
+    repo: (remoteUrl) => (remoteUrl === remote.url ? repo : null),
+    prs: () => list,
+    setPolicy: (next) => {
+      rules = next
+    },
+    failWith: (next) => {
+      failure = next
+    },
+    closeByHuman: (n) => {
+      const pr = list[n - 1]
+      if (pr !== undefined) pr.state = 'CLOSED'
+    },
+    merge: async (n) => {
+      const pr = list[n - 1]
+      if (pr === undefined || pr.state !== 'OPEN') return false
+      const work = repoAt(bin, await tempDir('action'))
+      try {
+        await runIn(bin, tmpdir(), ['clone', '-q', '-c', 'core.autocrlf=false', '-b', pr.base, remote.url, work.root])
+        await configure(work, 'GitHub Action')
+        await work.run(['fetch', '-q', 'origin', pr.head])
+        if ((await git(bin, work.root, ['merge', '--squash', 'FETCH_HEAD'])).code !== 0) return false
+        await work.run(['commit', '-q', '-m', `${pr.title} (#${n})`, '-m', pr.body])
+        // Fetched INTO the bare repo rather than pushed: the Action is not bound by the push rules a test hook enforces.
+        await runIn(bin, remote.url, ['fetch', '-q', work.root, `HEAD:refs/heads/${pr.base}`])
+        await onRemote(['branch', '-D', pr.head])
+        pr.state = 'MERGED'
+        return true
+      } finally {
+        await work.cleanup()
+      }
+    },
   }
 }

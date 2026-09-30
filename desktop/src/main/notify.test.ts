@@ -36,6 +36,18 @@ describe('notice rules (D7)', () => {
     expect(rules(makeStatus([makeFolder({ state: 'attention', attention: conflict(two) })]), NOW)).toEqual([])
   })
 
+  it.each<[Attention, RegExp]>([
+    [{ kind: 'no-gh', detail: 'GitHub CLI (gh) is not installed.' }, /needs GitHub CLI/i],
+    [{ kind: 'pr-closed', detail: 'https://github.com/yasin/notes/pull/3' }, /closed without merging/],
+    [{ kind: 'other-app', detail: 'Docs' }, /synced by the Docs app/],
+    [{ kind: 'busy-repo', detail: 'side-branch' }, /not its main branch/],
+  ])('%j says so in plain words, once per episode', (attention, body) => {
+    const rules = createNoticeRules()
+    const folder = makeFolder({ state: 'attention', attention })
+    expect(rules(makeStatus([folder]), NOW)).toEqual([{ folderId: 'notes', title: 'notes', body: expect.stringMatching(body) }])
+    expect(rules(makeStatus([folder]), NOW)).toEqual([])
+  })
+
   it('pending over an hour fires once per episode', () => {
     const rules = createNoticeRules()
     const since = NOW - PENDING_NOTICE_MS
@@ -44,6 +56,12 @@ describe('notice rules (D7)', () => {
     expect(rules(makeStatus([makeFolder({ state: 'pending', pendingSince: since })]), NOW + 60_000)).toEqual([])
     // A new episode (sent, then new changes that also got stuck) is news again.
     expect(rules(makeStatus([makeFolder({ state: 'pending', pendingSince: since - 5 })]), NOW)).toHaveLength(1)
+  })
+
+  it('pending over an hour on an open PR says the PR is waiting, not that nothing reached GitHub', () => {
+    const rules = createNoticeRules()
+    const folder = makeFolder({ state: 'pending', pendingSince: NOW - PENDING_NOTICE_MS, pr: { number: 12, url: 'https://github.com/yasin/notes/pull/12' } })
+    expect(rules(makeStatus([folder]), NOW)).toEqual([{ folderId: 'notes', title: 'notes', body: 'Changes have been waiting on pull request #12 for over an hour.' }])
   })
 
   it('never says anything about success, or about a folder the user switched off', () => {

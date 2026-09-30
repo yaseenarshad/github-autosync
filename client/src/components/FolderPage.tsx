@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
-import { CHECKS_EVERY, plural, SENDS_AFTER } from '@shared/status'
+import { CHECKS_EVERY, isGitHubUrl, OPENS_PR_AFTER, plural, SENDS_AFTER } from '@shared/status'
 import { formatBytes, tildify, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
@@ -21,6 +21,7 @@ interface Props {
 export function FolderPage({ folder: f, status, home, onSheet }: Props) {
   const v = folderView(f, status)
   const active = f.enabled && !status.paused
+  const problem = f.attention && f.attention.kind !== 'no-git' && active && !status.gitMissing ? f.attention : null
   const api = window.autosync
 
   return (
@@ -38,6 +39,12 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
               <span className="pill">
                 <Icon name="ext" />
                 {f.webUrl ? webLabel(f.webUrl) : f.remoteUrl}
+              </span>
+            )}
+            {f.publishVia === 'pr' && (
+              <span className="pill">
+                <Icon name="up" />
+                Publishes through pull requests
               </span>
             )}
             {f.alsoSyncedBy && (
@@ -77,19 +84,7 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
         )}
       </div>
 
-      {f.attention && f.attention.kind !== 'no-git' && active && !status.gitMissing && <ProblemCard folder={f} attention={f.attention} />}
-      {f.alsoSyncedBy && f.enabled && (
-        <div className="card warn">
-          <div className="ct">
-            <Icon name="alert" />
-            The {f.alsoSyncedBy} app also syncs this folder
-          </div>
-          <div className="cb">
-            Both apps will sync it. Nothing gets lost, but you may see a “busy” error now and then. To keep it quiet, turn sync off here or
-            in {f.alsoSyncedBy}.
-          </div>
-        </div>
-      )}
+      {problem && <ProblemCard folder={f} attention={problem} />}
       {f.tooBig.length > 0 && f.enabled && <TooBigCard folder={f} />}
 
       <NotSyncing folder={f} view={v} paused={status.paused} />
@@ -152,8 +147,18 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
         </>
       )
     case 'pending':
-      return f.sendAt === null ? (
-        <>Waiting for the next pass.</>
+      if (f.pr) {
+        return (
+          <>
+            Waiting on <GitHubLink url={f.pr.url}>PR #{f.pr.number}</GitHubLink> — synced once it's merged into {f.branch ?? 'main'}.
+          </>
+        )
+      }
+      if (f.sendAt === null) return <>Waiting for the next pass.</>
+      return f.publishVia === 'pr' ? (
+        <>
+          Opens a PR in <Countdown at={f.sendAt} /> — {OPENS_PR_AFTER}.
+        </>
       ) : (
         <>
           Sends in <Countdown at={f.sendAt} /> — {SENDS_AFTER}.
@@ -188,6 +193,12 @@ function problemText(a: Attention): { title: string; body: string } {
         body: "Git labels every change with a name and email, and won't save anything without them. It's a one-time setup on this computer — your changes are safe here until then.",
       }
     case 'busy-repo':
+      if (a.detail === 'side-branch') {
+        return {
+          title: 'On a side branch — switch back to the main branch to sync',
+          body: 'This repo publishes through pull requests, so AutoSync only syncs its main branch. Nothing on this branch is touched.',
+        }
+      }
       return a.detail === 'detached'
         ? {
             title: "This folder isn't on a branch",
@@ -197,6 +208,23 @@ function problemText(a: Attention): { title: string; body: string } {
             title: `This folder is in the middle of a ${a.detail === 'merge' ? 'merge' : 'rebase'}`,
             body: `Someone (probably you, by hand) started a ${a.detail === 'merge' ? 'merge' : 'rebase'} here and didn't finish it. AutoSync won't touch the folder until it's done, so nothing gets mixed up.`,
           }
+    case 'no-gh':
+      return {
+        title: "The GitHub CLI isn't set up",
+        body: `This repo only takes changes through pull requests, and AutoSync opens them with the GitHub CLI (“gh”), which is missing or logged out on ${platform.here}. It's a one-time setup — your changes are safe here until then.`,
+      }
+    case 'pr-closed':
+      return {
+        title: 'Someone closed the pull request without merging it',
+        body: `Your changes are safe on ${platform.here} — nothing is thrown away. Reopen the PR on GitHub and it will merge and land here, or press Send again to open a fresh one.`,
+      }
+    case 'other-app': {
+      const app = a.detail ?? 'Docs'
+      return {
+        title: `The ${app} app also syncs this folder`,
+        body: `One folder, one syncer: AutoSync is standing back and changing nothing until one of them is off. Turn off GitHub sync for this folder in the ${app} app, or turn this folder off here.`,
+      }
+    }
     // no-git never gets here: the global banner covers it.
     case 'no-git':
     case 'error':
@@ -227,9 +255,20 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
           ))}
         </ul>
       )}
-      {(a.kind === 'auth' || a.kind === 'error') && a.detail && <div className="prompt">{a.detail}</div>}
+      {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh') && a.detail && <div className="prompt">{a.detail}</div>}
+      {a.kind === 'pr-closed' && a.detail && (
+        <div className="cb">
+          <GitHubLink url={a.detail}>{webLabel(a.detail)}</GitHubLink>
+        </div>
+      )}
       <div className="acts">
-        <CopyPromptButton text={prompt} className="btn blue" />
+        {a.kind === 'pr-closed' && (
+          <button className="btn blue" onClick={() => window.autosync.resendPullRequest(f.id)}>
+            <Icon name="up" />
+            Send again
+          </button>
+        )}
+        <CopyPromptButton text={prompt} className={a.kind === 'pr-closed' ? 'btn' : 'btn blue'} />
         <button className="btn" onClick={() => window.autosync.showInFinder(f.id)}>
           <Icon name="folder" />
           Reveal in {platform.fileManager}
@@ -280,7 +319,11 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
       ? 'Waiting — paused'
       : view.kind === 'attention' && f.attention?.kind !== 'conflict'
         ? 'Waiting — fix the problem above'
-        : `Waiting — sends ${SENDS_AFTER}`
+        : f.pr
+          ? `Waiting — in PR #${f.pr.number}`
+          : f.publishVia === 'pr'
+            ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
+            : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
   const count = f.pending.length + f.tooBig.length + (ignored ? 1 : 0)
 
@@ -321,6 +364,17 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
         )}
       </div>
     </div>
+  )
+}
+
+/** A github.com link (`openExternal` opens nothing else); anything else shows as plain text. */
+function GitHubLink({ url, children }: { url: string; children: ReactNode }) {
+  return isGitHubUrl(url) ? (
+    <button className="link" onClick={() => window.autosync.openExternal(url)}>
+      {children}
+    </button>
+  ) : (
+    <>{children}</>
   )
 }
 

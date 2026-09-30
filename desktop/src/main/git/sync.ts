@@ -1,11 +1,13 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts.
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts, other-app refusal and the PR route (D22–D29; shared helpers moved to pass.ts).
 import { stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { Attention, ConflictPair, FileChange, OtherApp, TooBigFile } from '@shared/types'
-import { classifyGitFailure, findGit, firstMeaningfulLine, git, zList, type GitResult } from './exec'
+import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, TooBigFile } from '@shared/types'
+import { findGit, git, zList, type GitResult } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
-import { resolveRebase } from './resolve'
+import { ghCli, type GitHub, type RepoPolicy } from './github'
+import { CLEAN, commitMessage, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { exchangeViaPr } from './pullRequest'
 
 /**
  * One sync pass: "make this folder and its GitHub remote agree", as a single async function of a
@@ -16,7 +18,10 @@ import { resolveRebase } from './resolve'
  *     work, with one exception (`parkWhileRebasing`): a tracked file held back as too big.
  *   - REBASE, never merge: two computers editing different files replay cleanly and the history
  *     stays one line anyone can read on GitHub. Same-file conflicts keep both copies (`resolve.ts`).
- *   - A repo someone is in the middle of (rebase, merge, detached HEAD) is never touched (D16).
+ *   - A repo someone is in the middle of (rebase, merge, detached HEAD) is never touched (D16),
+ *     nor one the Docs/Draw app syncs (D27).
+ *   - HOW the commits reach GitHub is the repo's rules' call (D22): straight to the branch here,
+ *     or one PR per batch when the default branch requires PRs (`pullRequest.ts`).
  *
  * Every failure is CLASSIFIED rather than thrown: offline is not the user's problem (retry
  * quietly), auth and identity are (say so once), anything else is shown verbatim.
@@ -25,26 +30,11 @@ import { resolveRebase } from './resolve'
 /** GitHub refuses a push with any blob over 100 MiB; 95 leaves headroom for a file that is still growing (D11). */
 export const TOO_BIG_BYTES = 95 * 1024 * 1024
 
-/** A stalled transfer, not a slow one: a big folder over a home uplink can take minutes and must not restart from zero every 30 s. */
-export const TRANSFER_TIMEOUT_MS = 10 * 60_000
-
 /** Quitting never waits on a half-dead network for longer than this. */
 const FLUSH_PUSH_TIMEOUT_MS = 5_000
 
-/** How many file names a commit subject lists before it summarises the rest. */
-const SUBJECT_FILES = 3
-
 /** This computer's name in commit subjects and conflict copies (D16): macOS's `.local` suffix is noise. */
 export const hostName = (raw: string = os.hostname()): string => raw.replace(/\.local$/i, '')
-
-/** `sync (Mac-A): a.md, b.md, c.md +2 more`, or a bare `sync (Mac-A)`. Basenames — a subject is a glance; the paths are in the diff. */
-export function commitMessage(host: string, files: readonly string[]): string {
-  const names = files.map((f) => path.posix.basename(f)).filter((n) => n !== '')
-  if (names.length === 0) return `sync (${host})`
-  const rest = names.length - SUBJECT_FILES
-  const head = names.slice(0, SUBJECT_FILES).join(', ')
-  return rest > 0 ? `sync (${host}): ${head} +${rest} more` : `sync (${host}): ${head}`
-}
 
 export interface PassOptions {
   host: string
@@ -54,6 +44,12 @@ export interface PassOptions {
   candidates?: readonly string[]
   /** Told once the pass knows whether it is receiving (`down`) or sending (`up`). */
   onDirection?: (direction: 'up' | 'down') => void
+  /** GitHub's side of PR publishing (D28); the user's gh unless a test brings its own. */
+  github?: GitHub
+  /** The repo's rules as last read (the manager keeps them); unknown → this pass reads them (D22). */
+  policy?: RepoPolicy | null
+  /** False on quiet passes: in PR mode they may land a merged batch and receive, never send (D24). */
+  publish?: boolean
 }
 
 /** Everything the status shows that a pass re-reads when it ends. */
@@ -77,11 +73,11 @@ export interface PassResult {
   alsoSyncedBy: OtherApp | null
   /** Null when git could not read the folder at all. */
   facts: Facts | null
+  /** The repo's rules as this pass knew them; null = unknown (not GitHub, or gh could not say), never cached. */
+  policy: RepoPolicy | null
+  /** The batch's PR while it is open (D26). */
+  pr: PullRequestRef | null
 }
-
-type Verdict = Pick<PassResult, 'attention' | 'offline' | 'fetched' | 'level' | 'tooBig'>
-
-const CLEAN: Verdict = { attention: null, offline: false, fetched: false, level: false, tooBig: [] }
 
 export async function syncFolder(root: string, opts: PassOptions): Promise<PassResult> {
   const bin = await findGit(opts.candidates)
@@ -92,7 +88,7 @@ export async function syncFolder(root: string, opts: PassOptions): Promise<PassR
   }
   const alsoSyncedBy = await otherApp(root)
   const repo = await repoState(bin, root)
-  const verdict = await pass(bin, root, repo, opts)
+  const verdict = await pass(bin, root, repo, alsoSyncedBy, opts)
   const facts = await readFacts(bin, root, repo)
   const conflict: Attention | null = facts.conflicts.length > 0 ? { kind: 'conflict', conflicts: facts.conflicts } : null
   return { ...verdict, attention: verdict.attention ?? conflict, alsoSyncedBy, facts }
@@ -108,18 +104,26 @@ async function readFacts(bin: string, root: string, repo: RepoState): Promise<Fa
   }
 }
 
-/** offline → quiet retry; auth / identity → the user's to fix; anything else → git's own words. */
-function fromFailure(res: GitResult, tooBig: TooBigFile[], fetched = false): Verdict {
-  const kind = classifyGitFailure(res)
-  if (kind === 'offline') return { ...CLEAN, offline: true, fetched, tooBig }
-  if (kind === 'identity') return { ...CLEAN, attention: { kind: 'no-identity' }, fetched, tooBig }
-  return { ...CLEAN, attention: { kind: kind === 'auth' ? 'auth' : 'error', detail: firstMeaningfulLine(res) }, fetched, tooBig }
-}
+/** D29: the branch is not the one the PR rule governs. */
+const SIDE_BRANCH: Attention = { kind: 'busy-repo', detail: 'side-branch' }
 
-async function pass(bin: string, root: string, repo: RepoState, opts: PassOptions): Promise<Verdict> {
+async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: OtherApp | null, opts: PassOptions): Promise<Verdict> {
   // D16: zero writes — not even `add` — into a repo someone else is in the middle of.
   if (repo.busy !== null) return { ...CLEAN, attention: { kind: 'busy-repo', detail: repo.busy } }
+  // D27: two syncers on one folder would race each other's commits — the other app keeps it until its switch is off.
+  if (alsoSyncedBy !== null) return { ...CLEAN, attention: { kind: 'other-app', detail: alsoSyncedBy } }
   if (repo.remoteUrl === null) return { ...CLEAN, attention: { kind: 'error', detail: "error: No such remote 'origin'" } }
+
+  // D22: the rules pick the route. Unknown (not GitHub, or gh could not say) is push mode — as on
+  // the quit flush, which never waits on GitHub to read them.
+  const gh = (opts.github ?? ghCli).repo(repo.remoteUrl)
+  let policy = gh === null ? null : (opts.policy ?? null)
+  if (gh !== null && policy === null && opts.flush !== true) {
+    const read = await gh.policy()
+    if (read.ok) policy = read.value
+  }
+  // D29: a side branch of a PR-rule repo is someone's work in progress — zero writes.
+  if (policy?.requiresPr === true && repo.branch !== policy.defaultBranch) return { ...CLEAN, attention: SIDE_BRANCH, policy }
 
   // ---------- 1. local edits become one commit (minus anything GitHub would refuse — D11) ----------
   const staging = await stageWithinLimit(bin, root)
@@ -131,8 +135,20 @@ async function pass(bin: string, root: string, repo: RepoState, opts: PassOption
     if (committed.code !== 0) return fromFailure(committed, tooBig)
   }
 
-  return exchange(bin, root, tooBig, opts, true)
+  if (gh !== null && policy?.requiresPr === true) return { ...(await exchangeViaPr(bin, root, gh, policy, tooBig, opts)), policy }
+  const { needsPr, ...pushed } = await exchange(bin, root, tooBig, opts, true)
+  if (needsPr !== true || gh === null || opts.flush === true) return { ...pushed, policy }
+
+  // S6: a rule this pass did not know about refused the push — read the rules again and follow them now.
+  const fresh = await gh.policy()
+  if (!fresh.ok) return fromGhFailure(fresh.failure, tooBig, pushed.fetched)
+  if (!fresh.value.requiresPr) return { ...pushed, policy: fresh.value }
+  if (repo.branch !== fresh.value.defaultBranch) return { ...pushed, attention: SIDE_BRANCH, policy: fresh.value }
+  return { ...(await exchangeViaPr(bin, root, gh, fresh.value, tooBig, opts)), policy: fresh.value }
 }
+
+/** GitHub refusing a push because a ruleset says the branch takes changes only through PRs (GH013). */
+const NEEDS_PR = /GH013|through a pull request/i
 
 /**
  * Another computer's push landing between our fetch and our push: `[rejected] (fetch first)` when it
@@ -145,7 +161,7 @@ const PUSH_RACED = /\[rejected\]|non-fast-forward|fetch first|cannot lock ref|in
  * Fetch → rebase → push. `mayRetry`: a push that lost the race to another computer's is not a
  * problem to show anyone — the exchange simply runs once more against the newer upstream.
  */
-async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: PassOptions, mayRetry: boolean): Promise<Verdict> {
+async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: PassOptions, mayRetry: boolean): Promise<Verdict & { needsPr?: true }> {
   // ---------- 2. learn what GitHub has (skipped on the quit flush) ----------
   const flush = opts.flush === true
   if (!flush) {
@@ -171,11 +187,7 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
   // ---------- 3. replay our commits on top of theirs; same-file conflicts keep both (D6) ----------
   if (behind > 0 && !flush) {
     opts.onDirection?.('down')
-    const outcome = await parkWhileRebasing(bin, root, tooBig, async () => {
-      const rebased = await git(bin, root, ['rebase', '@{u}'])
-      if (rebased.code === 0 || (await resolveRebase(bin, root, opts.host))) return null
-      return rebased
-    })
+    const outcome = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['@{u}'])
     if (outcome !== null) return fromFailure(outcome, tooBig, true)
   }
 
@@ -184,6 +196,7 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
     opts.onDirection?.('up')
     const pushed = await git(bin, root, hasUpstream ? ['push'] : ['push', '-u', 'origin', 'HEAD'], { timeoutMs: flush ? FLUSH_PUSH_TIMEOUT_MS : TRANSFER_TIMEOUT_MS })
     if (pushed.code !== 0 && mayRetry && !flush && PUSH_RACED.test(pushed.stderr)) return exchange(bin, root, tooBig, opts, false)
+    if (pushed.code !== 0 && NEEDS_PR.test(pushed.stderr)) return { ...fromFailure(pushed, tooBig, !flush), needsPr: true }
     if (pushed.code !== 0) return fromFailure(pushed, tooBig, !flush)
   }
   return { ...CLEAN, fetched: !flush, level: !flush, tooBig }
@@ -220,40 +233,6 @@ async function stageWithinLimit(bin: string, root: string): Promise<{ failed: Gi
   if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])
   const all = new Map([...held, ...late].map((f) => [f.path, f]))
   return { failed: null, tooBig: [...all.values()].sort((a, b) => a.path.localeCompare(b.path)) }
-}
-
-/**
- * The one stash. A held-back TRACKED file is still modified after the commit, and `git rebase`
- * refuses to run over an unstaged change. So exactly those files are parked, the rebase runs, and
- * their bytes are copied back from the stash and the stash dropped — whether the rebase landed or
- * not. A copy, never a merge: it cannot conflict. Answers `rebase()`'s failure (null = landed), or
- * the git failure that stopped the park.
- *
- * `stash push` exits 0 even when it saved nothing (the file was reverted since it was listed), so
- * the stash is only restored and dropped when `refs/stash` moved to a new entry — the user's own
- * stashes are never touched.
- */
-async function parkWhileRebasing(bin: string, root: string, tooBig: readonly TooBigFile[], rebase: () => Promise<GitResult | null>): Promise<GitResult | null> {
-  const tracked = tooBig.length === 0 ? [] : zList(await git(bin, root, ['ls-files', '-z', '--', ...tooBig.map((f) => `:(literal)${f.path}`)]))
-  if (tracked.length === 0) return rebase()
-  const specs = tracked.map((p) => `:(literal)${p}`)
-  const before = await stashTop(bin, root)
-  const parked = await git(bin, root, ['stash', 'push', '-q', '-m', 'autosync: held back while rebasing', '--', ...specs])
-  if (parked.code !== 0) return parked
-  const ours = await stashTop(bin, root)
-  if (ours === before) return rebase()
-  try {
-    return await rebase()
-  } finally {
-    await git(bin, root, ['checkout', ours, '--', ...specs])
-    await git(bin, root, ['reset', '-q', '--', ...specs])
-    if ((await stashTop(bin, root)) === ours) await git(bin, root, ['stash', 'drop', '-q'])
-  }
-}
-
-/** The newest stash entry's sha, or '' when there is none. */
-async function stashTop(bin: string, root: string): Promise<string> {
-  return (await git(bin, root, ['rev-parse', '-q', '--verify', 'refs/stash'])).stdout.trim()
 }
 
 /** The pending list alone, for the manager's look between passes; null when git cannot read the folder. */

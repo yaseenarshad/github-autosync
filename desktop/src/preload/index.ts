@@ -38,6 +38,7 @@ const api: AutoSyncApi = {
   setFolderEnabled: (id, enabled) => ipcRenderer.invoke(channel('setFolderEnabled'), id, enabled),
   setPaused: (paused) => ipcRenderer.invoke(channel('setPaused'), paused),
   syncNow: (id) => ipcRenderer.invoke(channel('syncNow'), id),
+  resendPullRequest: (id) => ipcRenderer.invoke(channel('resendPullRequest'), id),
   activity: (id, cursor) => ipcRenderer.invoke(channel('activity'), id, cursor),
   setLaunchAtLogin: (on) => ipcRenderer.invoke(channel('setLaunchAtLogin'), on),
   setTheme: (theme) => ipcRenderer.invoke(channel('setTheme'), theme),

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import type { AutoSyncApi } from '@shared/api'
+import { isGitHubUrl } from '@shared/status'
 import type { AppStatus, NavTarget } from '@shared/types'
 import { channel, type Invokable } from '../channels'
 import { folderMenuTemplate } from './folderMenu'
@@ -24,9 +25,6 @@ export interface IpcDeps {
   /** Show the window and take it to `target` — the right-click menu's sheets. */
   navigate(target: NavTarget): void
 }
-
-/** The one site the app will open in a browser: every link it builds is a GitHub page. */
-export const isGithubUrl = (url: string): boolean => url.startsWith('https://github.com/')
 
 /**
  * `vscode://file/<path>` — the OS decides which VS Code answers, so nothing is spawned. Each segment is percent-encoded with the separators left literal; a Windows
@@ -84,6 +82,7 @@ export function registerIpc(deps: IpcDeps): void {
     setFolderEnabled: async (id, enabled) => change((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? { ...f, enabled } : f)) })),
     setPaused: async (paused) => change((c) => ({ ...c, paused })),
     syncNow: (id) => manager.syncNow(id),
+    resendPullRequest: (id) => manager.resend(id),
     activity: async (id, cursor) => readActivity(folderPath(id), deps.status().hostname, cursor),
     setLaunchAtLogin: async (on) => change((c) => ({ ...c, launchAtLogin: on })),
     setTheme: async (theme) => change((c) => ({ ...c, theme })),
@@ -92,7 +91,7 @@ export function registerIpc(deps: IpcDeps): void {
       if (failure !== '') throw new Error(failure)
     },
     openExternal: async (url) => {
-      if (isGithubUrl(url)) await shell.openExternal(url)
+      if (isGitHubUrl(url)) await shell.openExternal(url)
     },
     copyText: async (text) => clipboard.writeText(text),
     showFolderMenu: async (id) => {

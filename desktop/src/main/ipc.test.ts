@@ -1,14 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { isGithubUrl, terminalCommand, throttle, vscodeUrl } from './ipc'
+import { ipcMain } from 'electron'
+import { describe, expect, it, vi } from 'vitest'
+import { channel } from '../channels'
+import type { SyncManager } from './git/manager'
+import { registerIpc, terminalCommand, throttle, vscodeUrl, type IpcDeps } from './ipc'
 
-describe('isGithubUrl', () => {
-  it('opens GitHub pages and nothing else', () => {
-    expect(isGithubUrl('https://github.com/yaseen/notes')).toBe(true)
-    expect(isGithubUrl('https://github.com.evil.com/x')).toBe(false)
-    expect(isGithubUrl('http://github.com/yaseen/notes')).toBe(false)
-    expect(isGithubUrl('file:///etc/passwd')).toBe(false)
-  })
-})
+// Only the handler table is under test; nothing here opens a dialog or a window.
+vi.mock('electron', () => ({ ipcMain: { handle: vi.fn() }, clipboard: {}, dialog: {}, Menu: {}, shell: {} }))
 
 describe('throttle', () => {
   it('collapses a burst into one trailing call, then allows the next one', async () => {
@@ -43,5 +40,16 @@ describe('terminalCommand', () => {
 
   it('opens a new console already in the folder on Windows', () => {
     expect(terminalCommand('win32', 'C:\\My Notes')).toEqual({ file: 'cmd.exe', args: ['/c', 'start', '""', 'cmd.exe', '/K', 'cd /d "C:\\My Notes"'], verbatim: true })
+  })
+})
+
+describe('registerIpc', () => {
+  it('routes resendPullRequest to the manager (D25)', async () => {
+    const resend = vi.fn(async (_id: string) => undefined)
+    const deps = { manager: { resend } as unknown as SyncManager } as IpcDeps
+    registerIpc(deps)
+    const handler = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === channel('resendPullRequest'))?.[1]
+    await handler?.({} as Electron.IpcMainInvokeEvent, 'notes')
+    expect(resend).toHaveBeenCalledWith('notes')
   })
 })
