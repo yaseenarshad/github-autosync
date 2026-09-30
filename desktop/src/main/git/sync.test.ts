@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
 import { clone, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
-import { commitMessage, hostName, syncFolder, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS, type PassOptions } from './sync'
+import { commitMessage, TRANSFER_TIMEOUT_MS } from './pass'
+import { hostName, syncFolder, TOO_BIG_BYTES, type PassOptions } from './sync'
 
 // Real git throughout; the spy only records what each call was given.
 vi.mock('./exec', async (actual) => {

@@ -568,19 +568,38 @@ describe('PR mode (D22, D24, D26)', () => {
     expect(h.given.slice(0, 3).map((g) => g.publish)).toEqual([true, false, true])
   })
 
-  it('resend forgets the closed batch, then runs a normal pass; an inactive folder is a no-op', async () => {
-    const h = harness()
+  it('resend forgets the closed batch, then runs a normal pass — only while its PR is closed, and only on an active folder', async () => {
+    const closed = result({ level: false, policy: RULES, attention: { kind: 'pr-closed', detail: PR.url } }, EDIT)
+    const h = harness({ pass: async (n) => (n === 1 ? closed : result({ policy: RULES, pr: PR, level: false }, EDIT)) })
     h.manager.setFolders([A], false)
-    await until(() => h.status().state === 'synced')
+    await until(() => h.status().state === 'attention')
     await h.manager.resend('a')
     expect(h.forgotten).toEqual([{ root: A.path, afterPasses: 1 }])
     expect(h.passes).toHaveLength(2)
     expect(h.given[1]?.publish).toBe(true)
 
+    await h.manager.resend('a') // its PR is open now: nothing to resend
     h.manager.setFolders([{ ...A, enabled: false }], false)
     await h.manager.resend('a')
     await h.manager.resend('nope')
     expect(h.forgotten).toHaveLength(1)
     expect(h.passes).toHaveLength(2)
+  })
+
+  it.each(['pr-closed', 'other-app', 'busy-repo'] as const)('looks again quietly after `%s`: the user settles it outside the app', async (kind) => {
+    const h = harness({ pollMs: 10, pass: async () => result({ level: false, attention: { kind } }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length >= 2)
+    h.manager.setFolders([], false)
+    expect(h.given[1]?.publish).toBe(false)
+  })
+
+  it('does not look again after `no-gh`: that waits for the user', async () => {
+    const h = harness({ pollMs: 10, pass: async () => result({ level: false, attention: { kind: 'no-gh', detail: 'GitHub CLI (gh) is not installed.' } }) })
+    h.manager.setFolders([A], false)
+    await until(() => h.passes.length === 1 && h.status().state === 'attention')
+    await sleep(60)
+    expect(h.passes).toHaveLength(1)
+    h.manager.setFolders([], false)
   })
 })

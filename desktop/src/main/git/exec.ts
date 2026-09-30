@@ -59,7 +59,7 @@ const MAX_BUFFER = 10 * 1024 * 1024
  * First candidate that exists as a file, else null. Deliberately uncached: a cache would keep
  * answering "no git" after the user installs it. `stat` follows symlinks (Homebrew's Cellar link).
  */
-export async function resolveGit(candidates: readonly string[] = GIT_CANDIDATES): Promise<string | null> {
+export async function resolveBin(candidates: readonly string[] = GIT_CANDIDATES): Promise<string | null> {
   for (const bin of candidates) {
     const st = await stat(bin).catch(() => null)
     if (st?.isFile() === true) return bin
@@ -78,7 +78,7 @@ export async function findGit(candidates: readonly string[] = GIT_CANDIDATES): P
   const known = working.get(candidates)
   if (known !== undefined && (await stat(known).catch(() => null))?.isFile() === true) return known
   working.delete(candidates)
-  const bin = await resolveGit(candidates)
+  const bin = await resolveBin(candidates)
   if (bin === null) return null
   const version = await git(bin, path.parse(process.cwd()).root, ['--version']).catch(() => null)
   if (version?.code !== 0) return null
@@ -165,11 +165,11 @@ export function classifyGitFailure(res: GitResult): 'offline' | 'auth' | 'identi
   return 'other'
 }
 
-/** git's own `fatal:`/`error:` line when there is one, else the first non-blank line — progress chatter and hint epilogues are noise. */
-export function firstMeaningfulLine(res: GitResult): string {
+/** git's own `fatal:`/`error:` line when there is one, else the first non-blank line — progress chatter and hint epilogues are noise. `program` names a silent failure (`gh` runs here too). */
+export function firstMeaningfulLine(res: GitResult, program = 'git'): string {
   const lines = `${res.stderr}\n${res.stdout}`
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l !== '')
-  return lines.find((l) => /^(fatal|error):/i.test(l)) ?? lines[0] ?? `git exited ${res.code}`
+  return lines.find((l) => /^(fatal|error):/i.test(l)) ?? lines[0] ?? `${program} exited ${res.code}`
 }

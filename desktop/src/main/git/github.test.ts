@@ -81,9 +81,14 @@ describe('classifyGhFailure', () => {
     ['killed on timeout', fail('', GIT_TIMEOUT_CODE), 'offline'],
     ['bad token', fail('HTTP 401: Bad credentials (https://api.github.com/graphql)'), 'auth'],
     ['token refused', fail('HTTP 403: Resource not accessible by integration (https://api.github.com/repos/acme/notes)'), 'auth'],
+    ['rate limited', fail('HTTP 403: API rate limit exceeded for user ID 1.'), 'offline'],
     ['anything else', fail('HTTP 404: Not Found (https://api.github.com/repos/acme/nope)'), 'error'],
   ])('%s → %s', (_name, res, kind) => {
     expect(classifyGhFailure(res).kind).toBe(kind)
+  })
+
+  it('names gh when it failed without a word', () => {
+    expect(classifyGhFailure(fail(''))).toEqual({ kind: 'error', detail: 'gh exited 1' })
   })
 
   it("keeps gh's own words", () => {

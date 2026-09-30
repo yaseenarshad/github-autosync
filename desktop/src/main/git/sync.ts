@@ -5,11 +5,9 @@ import path from 'node:path'
 import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, TooBigFile } from '@shared/types'
 import { findGit, git, zList, type GitResult } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
-import { ghCli, type GitHub, type GitHubRepo, type RepoPolicy } from './github'
-import { CLEAN, commitMessage, fromFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { ghCli, type GitHub, type RepoPolicy } from './github'
+import { CLEAN, commitMessage, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import { exchangeViaPr } from './pullRequest'
-
-export { commitMessage, TRANSFER_TIMEOUT_MS } from './pass'
 
 /**
  * One sync pass: "make this folder and its GitHub remote agree", as a single async function of a
@@ -109,12 +107,6 @@ async function readFacts(bin: string, root: string, repo: RepoState): Promise<Fa
 /** D29: the branch is not the one the PR rule governs. */
 const SIDE_BRANCH: Attention = { kind: 'busy-repo', detail: 'side-branch' }
 
-/** The rules, or null when gh cannot say (not installed, offline…) — push mode until a push says otherwise. */
-async function readPolicy(gh: GitHubRepo): Promise<RepoPolicy | null> {
-  const read = await gh.policy()
-  return read.ok ? read.value : null
-}
-
 async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: OtherApp | null, opts: PassOptions): Promise<Verdict> {
   // D16: zero writes — not even `add` — into a repo someone else is in the middle of.
   if (repo.busy !== null) return { ...CLEAN, attention: { kind: 'busy-repo', detail: repo.busy } }
@@ -122,9 +114,14 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
   if (alsoSyncedBy !== null) return { ...CLEAN, attention: { kind: 'other-app', detail: alsoSyncedBy } }
   if (repo.remoteUrl === null) return { ...CLEAN, attention: { kind: 'error', detail: "error: No such remote 'origin'" } }
 
-  // D22: the rules pick the route. Unknown (not GitHub, or gh could not say) is push mode.
+  // D22: the rules pick the route. Unknown (not GitHub, or gh could not say) is push mode — as on
+  // the quit flush, which never waits on GitHub to read them.
   const gh = (opts.github ?? ghCli).repo(repo.remoteUrl)
-  const policy = gh === null ? null : (opts.policy ?? (await readPolicy(gh)))
+  let policy = gh === null ? null : (opts.policy ?? null)
+  if (gh !== null && policy === null && opts.flush !== true) {
+    const read = await gh.policy()
+    if (read.ok) policy = read.value
+  }
   // D29: a side branch of a PR-rule repo is someone's work in progress — zero writes.
   if (policy?.requiresPr === true && repo.branch !== policy.defaultBranch) return { ...CLEAN, attention: SIDE_BRANCH, policy }
 
@@ -140,18 +137,18 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
 
   if (gh !== null && policy?.requiresPr === true) return { ...(await exchangeViaPr(bin, root, gh, policy, tooBig, opts)), policy }
   const { needsPr, ...pushed } = await exchange(bin, root, tooBig, opts, true)
-  if (needsPr !== true || gh === null) return { ...pushed, policy }
+  if (needsPr !== true || gh === null || opts.flush === true) return { ...pushed, policy }
 
   // S6: a rule this pass did not know about refused the push — read the rules again and follow them now.
   const fresh = await gh.policy()
-  if (!fresh.ok) return { ...pushed, attention: { kind: 'no-gh', detail: fresh.failure.detail } }
+  if (!fresh.ok) return fromGhFailure(fresh.failure, tooBig, pushed.fetched)
   if (!fresh.value.requiresPr) return { ...pushed, policy: fresh.value }
   if (repo.branch !== fresh.value.defaultBranch) return { ...pushed, attention: SIDE_BRANCH, policy: fresh.value }
   return { ...(await exchangeViaPr(bin, root, gh, fresh.value, tooBig, opts)), policy: fresh.value }
 }
 
-/** GitHub refusing a push because the branch takes changes only through PRs: a ruleset (GH013) or branch protection (GH006). */
-const NEEDS_PR = /GH013|GH006|must be made through a pull request|protected branch/i
+/** GitHub refusing a push because a ruleset says the branch takes changes only through PRs (GH013). */
+const NEEDS_PR = /GH013|through a pull request/i
 
 /**
  * Another computer's push landing between our fetch and our push: `[rejected] (fetch first)` when it
