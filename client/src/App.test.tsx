@@ -26,6 +26,7 @@ function mockApi(status: AppStatus) {
     setFolderEnabled: vi.fn(async () => status),
     setPaused: vi.fn(async () => status),
     syncNow: vi.fn(async () => {}),
+    resendPullRequest: vi.fn(async () => {}),
     activity: vi.fn(async (): Promise<ActivityPage> => ({ entries: [], cursor: null })),
     setLaunchAtLogin: vi.fn(),
     setTheme: vi.fn(async () => status),
@@ -272,8 +273,9 @@ describe('folder page wording', () => {
   async function show(extra: Parameters<typeof makeFolder>[0]) {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(at)
-    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ...extra })]))
+    const api = await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ...extra })]))
     await click(button('notes'))
+    return api
   }
 
   it('one file too big for GitHub', async () => {
@@ -289,6 +291,62 @@ describe('folder page wording', () => {
   it('pending, with the send counting down', async () => {
     await show({ state: 'pending', pending: [change, change], sendAt: at + 23_000 })
     expect(text('.status .s')).toBe('Sends in 0:23 — 30s after you stop editing.')
+  })
+
+  it('a pull-request folder counts down to opening its PR (D24)', async () => {
+    await show({ state: 'pending', publishVia: 'pr', pending: [change], sendAt: at + 252_000 })
+    expect(text('.status .s')).toBe('Opens a PR in 4:12 — 5 minutes after you stop editing.')
+    expect(text('.pills')).toContain('Publishes through pull requests')
+    expect(text('.tbl .m')).toBe('Waiting — opens a PR 5 minutes after you stop editing')
+  })
+
+  it('waiting on an open PR links to it', async () => {
+    const url = 'https://github.com/yasin/notes/pull/12'
+    const api = await show({ state: 'pending', publishVia: 'pr', pr: { number: 12, url }, pending: [change] })
+    expect(text('.status .h')).toBe('Your changes are in a pull request')
+    expect(text('.status .s')).toBe("Waiting on PR #12 — synced once it's merged into main.")
+    expect(text('.row.sel .sub')).toBe('Waiting on PR #12')
+    await click(document.querySelector<HTMLButtonElement>('.status .s .link')!)
+    expect(api.openExternal).toHaveBeenCalledWith(url)
+  })
+
+  it('push folders do not mention pull requests', async () => {
+    await show({})
+    expect(container.textContent).not.toContain('pull request')
+  })
+
+  it('a closed PR links to it and offers Send again (D25)', async () => {
+    const url = 'https://github.com/yasin/notes/pull/7'
+    const api = await show({ state: 'attention', publishVia: 'pr', attention: { kind: 'pr-closed', detail: url } })
+    expect(text('.card .ct')).toBe('Someone closed the pull request without merging it')
+    expect(text('.card .cb')).toBe(
+      `Your changes are safe on ${platform.here} — nothing is thrown away. Reopen the PR on GitHub and it will merge and land here, or press Send again to open a fresh one.`,
+    )
+    await click(button('github.com/yasin/notes/pull/7'))
+    expect(api.openExternal).toHaveBeenCalledWith(url)
+    await click(button('Send again'))
+    expect(api.resendPullRequest).toHaveBeenCalledWith('notes')
+    expect(api.syncNow).not.toHaveBeenCalled()
+  })
+
+  it('missing GitHub CLI shows gh\'s own words', async () => {
+    await show({ state: 'attention', publishVia: 'pr', attention: { kind: 'no-gh', detail: 'You are not logged into any GitHub hosts.' } })
+    expect(text('.card .ct')).toBe("The GitHub CLI isn't set up")
+    expect(text('.card .prompt')).toBe('You are not logged into any GitHub hosts.')
+  })
+
+  it('another app syncing the folder: one card, naming the app (D27)', async () => {
+    await show({ state: 'attention', alsoSyncedBy: 'Draw', attention: { kind: 'other-app', detail: 'Draw' } })
+    expect([...document.querySelectorAll('.card .ct')].map((c) => c.textContent)).toEqual(['The Draw app also syncs this folder'])
+    expect(text('.card .cb')).toBe(
+      'One folder, one syncer: AutoSync is standing back and changing nothing until one of them is off. Turn off GitHub sync for this folder in the Draw app, or turn this folder off here.',
+    )
+  })
+
+  it('a side branch of a pull-request repo', async () => {
+    await show({ state: 'attention', publishVia: 'pr', branch: 'yasin/draft', attention: { kind: 'busy-repo', detail: 'side-branch' } })
+    expect(text('.card .ct')).toBe('On a side branch — switch back to the main branch to sync')
+    expect(text('.row.sel .sub')).toBe('On a side branch')
   })
 })
 
@@ -321,7 +379,9 @@ describe('add folder (D12)', () => {
 
   it('a folder another app syncs, while offline: warns, and adds on click', async () => {
     const api = await pick({ ok: true, path, warning: 'Draw', offline: true })
-    expect(verdictText()).toBe("The Draw app also syncs this folder. You can still add it — both will sync. Nothing gets lost, it's just noisier. Couldn't reach GitHub right now — it will retry.")
+    expect(verdictText()).toBe(
+      "The Draw app also syncs this folder. You can still add it, but AutoSync will wait until GitHub sync is turned off for this folder in Draw — one folder, one syncer. Couldn't reach GitHub right now — it will retry.",
+    )
     api.addFolder.mockResolvedValue(makeStatus([makeFolder({ id: 'new', path })]))
     await click(inSheet('Add folder'))
     expect(api.addFolder).toHaveBeenCalledWith(path)

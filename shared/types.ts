@@ -6,9 +6,11 @@ export type SyncState = 'off' | 'synced' | 'pending' | 'syncing' | 'attention'
 
 /**
  * Why a folder needs the user. `conflict` does NOT stop syncing (D6 keep-both); every other kind does.
- * `busy-repo` = mid-rebase, mid-merge or detached HEAD — AutoSync never touches it (D16).
+ * `busy-repo` = mid-rebase, mid-merge, detached HEAD, or a side branch of a PR-rule repo — AutoSync never touches it (D16, D29).
+ * `no-gh` = the repo needs PRs and `gh` is missing or logged out (D28). `pr-closed` = a human closed the batch's PR (D25).
+ * `other-app` = the Docs/Draw app syncs this folder too; AutoSync stands back (D27).
  */
-export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'error'
+export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'error'
 
 /** Repo-relative paths: the original file and the `<name> (conflict <host>, <YYYY-MM-DD>)<ext>` copy beside it. */
 export interface ConflictPair {
@@ -18,7 +20,10 @@ export interface ConflictPair {
 
 export interface Attention {
   kind: AttentionKind
-  /** git's first `fatal:`/`error:` line for `error`/`auth`; `rebase` | `merge` | `detached` for `busy-repo`. */
+  /**
+   * git's first `fatal:`/`error:` line for `error`/`auth`; `rebase` | `merge` | `detached` | `side-branch` for `busy-repo`;
+   * the PR's URL for `pr-closed`; `Docs` | `Draw` for `other-app`; gh's own words for `no-gh`.
+   */
   detail?: string
   conflicts?: ConflictPair[]
 }
@@ -36,6 +41,15 @@ export interface TooBigFile {
 }
 
 export type OtherApp = 'Docs' | 'Draw'
+
+/** How a folder's changes reach GitHub: straight to the branch, or one PR per batch (D22 — read from the repo's rules). */
+export type PublishVia = 'push' | 'pr'
+
+/** The batch in flight: its PR, until the repo's Action merges it (D23, D26). */
+export interface PullRequestRef {
+  number: number
+  url: string
+}
 
 export interface FolderStatus {
   id: string
@@ -55,22 +69,26 @@ export interface FolderStatus {
   remoteUrl: string | null
   /** `https://github.com/<owner>/<repo>` when origin is GitHub, else null. */
   webUrl: string | null
+  /** `push` until the repo's rules are known to require PRs on this branch (D22). */
+  publishVia: PublishVia
+  /** Set while a batch's PR is open: the folder is `pending` until it merges (D26). */
+  pr: PullRequestRef | null
   /** Changes on this computer that are not on GitHub yet: uncommitted + committed-but-unpushed. */
   pending: FileChange[]
   /** Never staged: ≥ 95 MiB (D11). */
   tooBig: TooBigFile[]
   /** Top-level `.gitignore` patterns and how many files git currently ignores (D10). */
   ignored: { patterns: string[]; count: number }
-  /** The Docs/Draw app has its own sync switched on for this folder (D2) — warn only. */
+  /** The Docs/Draw app has its own sync switched on for this folder — AutoSync stands back (D27, `other-app`). */
   alsoSyncedBy: OtherApp | null
   offline: boolean
-  /** Last pass that ended level with origin. */
+  /** Last pass that ended level with origin — in PR mode, with the batch merged into the branch. */
   lastSyncedAt: number | null
   /** Last successful `git fetch`. */
   lastCheckedAt: number | null
   /** When the current run of unsent changes began (pending > 1 h notifies once, D7). */
   pendingSince: number | null
-  /** When the 30 s debounce fires (D3) — drives "Sends in 0:23". */
+  /** When the debounce fires — 30 s (D3), or 5 min in PR mode (D24); drives "Sends in 0:23" / "Opens a PR in 4:12". */
   sendAt: number | null
   /** When the single offline retry fires (D3). */
   retryAt: number | null

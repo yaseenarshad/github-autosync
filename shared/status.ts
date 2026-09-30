@@ -9,6 +9,10 @@ import type { AppStatus, FolderStatus, SyncState } from './types'
 
 /** A save is sent this long after the last edit; every later edit pushes it back. */
 export const DEBOUNCE_MS = 30_000
+/** D24: a PR-mode folder opens its PR this long after the last edit — one PR per sitting, not per save. */
+export const PR_QUIET_MS = 5 * 60_000
+/** While a batch's PR is open, how often a quiet pass checks whether it merged. */
+export const PR_CHECK_MS = 15_000
 /** A folder that ended level pulls again this often. */
 export const POLL_MS = 60_000
 /** After an offline pass, the one quiet retry. */
@@ -22,7 +26,13 @@ export const OWN_WRITES_MS = 1_000
 
 /** The cadence as the UI words it, derived from the timers above so the two cannot drift. */
 export const SENDS_AFTER = `${DEBOUNCE_MS / 1000}s after you stop editing`
+export const OPENS_PR_AFTER = `${PR_QUIET_MS / 60_000} minutes after you stop editing`
 export const CHECKS_EVERY = POLL_MS === 60_000 ? 'every minute' : `every ${POLL_MS / 1000}s`
+
+// ---------- links ----------
+
+/** The one site the app opens in a browser (`openExternal`) — so also the only URLs the window renders as links. */
+export const isGitHubUrl = (url: string): boolean => url.startsWith('https://github.com/')
 
 // ---------- worst state ----------
 

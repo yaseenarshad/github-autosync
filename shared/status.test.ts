@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { SyncState } from './types'
-import { byWorst, CHECKS_EVERY, clock, headline, lastSyncedAt, plural, SENDS_AFTER } from './status'
+import { byWorst, CHECKS_EVERY, clock, headline, isGitHubUrl, lastSyncedAt, plural, SENDS_AFTER } from './status'
 import { makeFolder, makeStatus } from './testFixtures'
 
 const change = { status: 'M' as const, path: 'a.md' }
+
+describe('isGitHubUrl', () => {
+  it('is https://github.com/ pages and nothing else', () => {
+    expect(isGitHubUrl('https://github.com/yasin/notes/pull/12')).toBe(true)
+    expect(isGitHubUrl('https://github.com.evil.com/x')).toBe(false)
+    expect(isGitHubUrl('https://github.company.com/yasin/notes/pull/12')).toBe(false)
+    expect(isGitHubUrl('http://github.com/yasin/notes')).toBe(false)
+    expect(isGitHubUrl('file:///etc/passwd')).toBe(false)
+  })
+})
 
 describe('byWorst', () => {
   it('orders attention, pending, syncing, synced, off', () => {

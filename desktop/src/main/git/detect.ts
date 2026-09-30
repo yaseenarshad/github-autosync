@@ -126,7 +126,7 @@ export function webUrlOf(remoteUrl: string | null): string | null {
   return m === null ? null : `https://github.com/${m[1]}/${m[2]}`
 }
 
-/** D2: the Docs and Draw apps keep their own per-folder GitHub switch; two syncers on one folder is worth a warning, not a refusal. */
+/** D27: the Docs and Draw apps keep their own per-folder GitHub switch; while it is on a pass stands back (zero writes) and add-folder warns. */
 const OTHER_APPS: ReadonlyArray<[OtherApp, string]> = [
   ['Docs', '.yaseendocs/github.json'],
   ['Draw', '.yaseendraw/github.json'],
@@ -149,7 +149,7 @@ export async function otherApp(root: string): Promise<OtherApp | null> {
 const PROBE_TIMEOUT_MS = 15_000
 
 /**
- * D12/D2 add-folder validation, in the order the user should hear about problems: no git at all,
+ * D12/D27 add-folder validation, in the order the user should hear about problems: no git at all,
  * not the top of a repo, already listed, no GitHub to sync with, GitHub refusing us. Being offline
  * is not a reason to refuse — the folder syncs once the network is back.
  */

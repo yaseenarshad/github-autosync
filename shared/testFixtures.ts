@@ -15,6 +15,8 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
     branch: 'main',
     remoteUrl: 'https://github.com/yasin/notes.git',
     webUrl: 'https://github.com/yasin/notes',
+    publishVia: 'push',
+    pr: null,
     pending: [],
     tooBig: [],
     ignored: { patterns: [], count: 0 },

@@ -72,7 +72,8 @@ function Verdict({ verdict: v, home, onUseRoot }: { verdict: FolderVerdict; home
     const offline = v.offline && " Couldn't reach GitHub right now — it will retry."
     return v.warning ? (
       <Box tone="warn">
-        The {v.warning} app also syncs this folder. You can still add it — both will sync. Nothing gets lost, it's just noisier.{offline}
+        The {v.warning} app also syncs this folder. You can still add it, but AutoSync will wait until GitHub sync is turned off for this
+        folder in {v.warning} — one folder, one syncer.{offline}
       </Box>
     ) : (
       <Box tone="ok">Git folder with a GitHub remote. Ready to sync.{offline}</Box>

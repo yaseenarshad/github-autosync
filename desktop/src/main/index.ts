@@ -4,6 +4,7 @@ import type { AppStatus, NavTarget } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
 import { findGit } from './git/exec'
 import { createSyncManager } from './git/manager'
+import { forgetInFlight } from './git/pullRequest'
 import { hostName, peekPending, syncFolder } from './git/sync'
 import { registerIpc, throttle } from './ipc'
 import { createNoticeRules, type Notice } from './notify'
@@ -36,6 +37,7 @@ const registry = createRegistry(app.getPath('userData'))
 const manager = createSyncManager({
   sync: (root, opts) => syncFolder(root, { ...opts, host: HOST }),
   peek: (root) => peekPending(root),
+  forgetInFlight,
   watch: watchFolder,
   onChange: () => refresh(),
 })

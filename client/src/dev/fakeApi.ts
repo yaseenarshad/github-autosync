@@ -23,6 +23,8 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     branch: 'main',
     remoteUrl: `https://github.com/yaseenarshad/${name}.git`,
     webUrl: `https://github.com/yaseenarshad/${name}`,
+    publishVia: 'push',
+    pr: null,
     pending: [],
     tooBig: [],
     ignored: { patterns: ['.DS_Store'], count: 3 },
@@ -92,7 +94,12 @@ export function createFakeApi(): AutoSyncApi {
         attention: { kind: 'conflict', conflicts },
         ignored: { patterns: ['node_modules/', '.venv/', '__pycache__/', '.DS_Store'], count: 1043 },
       }),
-      folder('yaseen-docs-vault', 'Documents/GitHub', { alsoSyncedBy: 'Docs', lastSyncedAt: now - 2 * MIN }),
+      folder('yaseen-docs-vault', 'Documents/GitHub', {
+        state: 'attention',
+        attention: { kind: 'other-app', detail: 'Docs' },
+        alsoSyncedBy: 'Docs',
+        lastSyncedAt: now - 2 * MIN,
+      }),
       folder('YasinContentForge1', 'Documents/GitHub', { state: 'syncing', direction: 'up' }),
       folder('journal-notes', 'Documents/GitHub', {
         state: 'pending',
@@ -115,6 +122,28 @@ export function createFakeApi(): AutoSyncApi {
         state: 'attention',
         attention: { kind: 'busy-repo', detail: 'rebase' },
         lastSyncedAt: now - 6 * HOUR,
+      }),
+      // Team repos that require pull requests (D22): one waiting on its PR, one counting down to open one, one whose PR was closed.
+      folder('team-handbook', 'Documents/GitHub/team', {
+        state: 'pending',
+        publishVia: 'pr',
+        pr: { number: 12, url: 'https://github.com/yaseenarshad/team-handbook/pull/12' },
+        pending: [{ status: 'M', path: 'onboarding/first-week.md' }],
+        pendingSince: now - 7 * MIN,
+      }),
+      folder('team-sops', 'Documents/GitHub/team', {
+        state: 'pending',
+        publishVia: 'pr',
+        pending: [{ status: 'M', path: 'support/refunds.md' }],
+        pendingSince: now - 48_000,
+        sendAt: now + 4 * MIN + 12_000,
+      }),
+      folder('team-wiki', 'Documents/GitHub/team', {
+        state: 'attention',
+        publishVia: 'pr',
+        attention: { kind: 'pr-closed', detail: 'https://github.com/yaseenarshad/team-wiki/pull/7' },
+        pending: [{ status: 'A', path: 'clients/acme.md' }],
+        lastSyncedAt: now - 3 * HOUR,
       }),
       folder('drafts', 'yaseen-os', { enabled: false, state: 'off', lastSyncedAt: now - 9 * 24 * HOUR }),
     ],
@@ -184,10 +213,14 @@ export function createFakeApi(): AutoSyncApi {
       for (const f of status.folders.filter((f) => (id === null || f.id === id) && f.enabled)) {
         await patch(f.id, { state: 'syncing', direction: f.pending.length ? 'up' : 'down' })
         setTimeout(
-          () => patch(f.id, { state: 'synced', direction: null, attention: null, pending: [], sendAt: null, lastSyncedAt: Date.now() }),
+          () => patch(f.id, { state: 'synced', direction: null, attention: null, pr: null, pending: [], sendAt: null, lastSyncedAt: Date.now() }),
           1500,
         )
       }
+    },
+    async resendPullRequest(id) {
+      await patch(id, { state: 'syncing', direction: 'up', attention: null })
+      setTimeout(() => patch(id, { state: 'pending', direction: null, pr: { number: 8, url: `https://github.com/yaseenarshad/${id}/pull/8` } }), 1500)
     },
     activity(id, cursor = 0) {
       const all = log.get(id) ?? []
