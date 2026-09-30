@@ -18,19 +18,15 @@
 
 ## State
 - Done:
-  - [x] 1 Deep scope (YAZ-2251) — build map comment
-  - [x] 2 Recover stranded branch (YAZ-2252) — skills-growprofit-eng PR #4 merged, checkout on main
-- Now: [→] 3A–3D engine (Opus agent) + 4A/4B GUI (Opus agent), in parallel in this worktree
-- Remaining:
-  - [ ] Review both agents' diffs; full typecheck/test/build
-  - [ ] 5A/5B automated proofs (mostly the acceptance suite) — post evidence
-  - [ ] 5C real GitHub proof: private throwaway repo in GrowProfit-Engineering (approved), same ruleset + publish.yml; delete after
-  - [ ] 5D Yasin hands-on with exact steps
-  - [ ] 6A audit, 6B apply
-  - [ ] Commit, merge, push; release (smallest bump), release notes for every release, replace installed app
+  - [x] 1 Deep scope (YAZ-2251)
+  - [x] 2 Recover stranded branch (YAZ-2252) — skills-growprofit-eng PR #4
+  - [x] 3A–3D engine, 4A/4B GUI
+  - [x] 5A/5B automated proofs, 5C real GitHub proof (throwaway org repo), 5D Yasin hands-on (PR #10)
+  - [x] 6A audit (29 items), 6B applied
+  - [x] v0.1.2: merged to main, tagged, release notes, app replaced
 
 ## Open Questions
-- UNCONFIRMED: `gh pr close --delete-branch` run outside the repo (cwd = fs root) deletes only the remote branch.
+- None open. Confirmed: with `-R`, `gh pr close --delete-branch` never touches local branches.
 
 ## Working Set
 - Worktree: `/Users/yasin/Documents/GitHub/github-autosync-yaz-2250`, branch `yaz-2250-collab-pr` (from `main` c987f9c).
