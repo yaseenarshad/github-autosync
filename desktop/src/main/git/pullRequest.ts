@@ -15,7 +15,7 @@ import type { PassOptions } from './sync'
  * finishes the send next time, and never opens a second PR. The batch's branch is immutable:
  * nothing is pushed to it again once its PR exists.
  *
- * While the ref exists the pass only checks the PR — no rebase, no push:
+ * While the ref exists the pass only checks the PR (before it fetches) — no rebase, no push:
  *   - OPEN → wait; if it CONFLICTS with the branch (a teammate's batch landed first), close it,
  *     replay ours keep-both on top, and send that instead (D25).
  *   - MERGED → land it: the commits made since the batch are replayed onto the squash, the ref goes.
@@ -33,6 +33,16 @@ const branchOf = (sha: string): string => `autosync/${sha.slice(0, 12)}`
 
 const refOf = (pr: PullRequest): PullRequestRef => ({ number: pr.number, url: pr.url })
 
+/** How many files a PR body lists; a batch that touched thousands would otherwise hit GitHub's body limit. */
+const BODY_FILES = 50
+
+/** The batch's files, one per line, the rest counted. */
+function prBody(files: readonly string[]): string {
+  const lines = files.slice(0, BODY_FILES).map((f) => `- ${f}`)
+  if (files.length > BODY_FILES) lines.push(`- …and ${files.length - BODY_FILES} more`)
+  return lines.join('\n')
+}
+
 /** D25 "Send again": drop the closed batch's marker. Its commits stay, so the next pass sends them as a fresh PR. */
 export async function forgetInFlight(root: string): Promise<void> {
   const bin = await findGit()
@@ -42,31 +52,35 @@ export async function forgetInFlight(root: string): Promise<void> {
 export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, policy: RepoPolicy, tooBig: TooBigFile[], opts: PassOptions): Promise<Verdict> {
   // S13: quitting never waits on GitHub — the commit is made, the next start sends it.
   if (opts.flush === true) return { ...CLEAN, tooBig }
+  const publish = opts.publish !== false
+  const batch = (await git(bin, root, ['rev-parse', '-q', '--verify', IN_FLIGHT])).stdout.trim()
+  // The PR is asked about BEFORE the fetch: a MERGED answer then always meets an `@{u}` that holds its squash.
+  const found = batch === '' ? null : await gh.findPr(branchOf(batch))
+  if (found?.ok === false) return fromGhFailure(found.failure, tooBig, false)
   // `--prune`: every merged batch deletes its branch; without it their remote-tracking refs pile up.
   const fetched = await git(bin, root, ['fetch', '--prune', 'origin'], { timeoutMs: TRANSFER_TIMEOUT_MS })
   if (fetched.code !== 0) return fromFailure(fetched, tooBig)
   const waiting = (pr: PullRequest | null): Verdict => ({ ...CLEAN, fetched: true, tooBig, pr: pr === null ? null : refOf(pr) })
-  const publish = opts.publish !== false
 
-  const batch = (await git(bin, root, ['rev-parse', '-q', '--verify', IN_FLIGHT])).stdout.trim()
-  if (batch !== '') {
-    const found = await gh.findPr(branchOf(batch))
-    if (!found.ok) return fromGhFailure(found.failure, tooBig, true)
+  if (found?.ok === true) {
     const pr = found.value
     // S11: the pass that set the ref died before the PR was open.
     if (pr === null) return publish ? send(bin, root, gh, policy, batch, tooBig, opts) : waiting(null)
     if (pr.state === 'CLOSED') return { ...CLEAN, attention: { kind: 'pr-closed', detail: pr.url }, fetched: true, tooBig }
     if (pr.state === 'OPEN' && pr.mergeable !== 'CONFLICTING') return waiting(pr)
     if (pr.state === 'OPEN') {
-      // Failing to close means it merged meanwhile: the next check lands it.
-      if (!(await gh.closePr(pr.number, REPLACED)).ok) return waiting(pr)
-    } else if ((await git(bin, root, ['merge-base', '--is-ancestor', batch, 'HEAD'])).code === 0) {
+      // A close that fails keeps the ref: offline retries quietly, anything else is gh's words.
+      const closed = await gh.closePr(pr.number, REPLACED)
+      if (!closed.ok) return fromGhFailure(closed.failure, tooBig, true)
+    } else {
       // MERGED: the squash stands in for the batch; only what was committed since is ours to replay.
-      opts.onDirection?.('down')
-      const landed = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['--onto', '@{u}', batch])
-      if (landed !== null) return fromFailure(landed, tooBig, true)
+      // S20: a batch no longer under HEAD (the user reset past it) replays nothing and is only forgotten — history is theirs.
+      if ((await git(bin, root, ['merge-base', '--is-ancestor', batch, 'HEAD'])).code === 0) {
+        opts.onDirection?.('down')
+        const landed = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['--onto', '@{u}', batch])
+        if (landed !== null) return fromFailure(landed, tooBig, true)
+      }
     }
-    // S20: a batch no longer under HEAD (the user reset past it) is only forgotten — history is theirs.
     await git(bin, root, ['update-ref', '-d', IN_FLIGHT])
   }
 
@@ -104,7 +118,7 @@ async function send(bin: string, root: string, gh: GitHubRepo, policy: RepoPolic
   if (found.value?.state === 'OPEN') return { ...CLEAN, fetched: true, tooBig, pr: refOf(found.value) }
   // Three dots: the batch's own files, measured from where it left the branch.
   const files = zList(await git(bin, root, ['diff', '--name-only', '-z', `@{u}...${batch}`]))
-  const created = await gh.createPr({ head: branch, base: policy.defaultBranch, title: commitMessage(opts.host, files), body: files.map((f) => `- ${f}`).join('\n') })
+  const created = await gh.createPr({ head: branch, base: policy.defaultBranch, title: commitMessage(opts.host, files), body: prBody(files) })
   if (!created.ok) return fromGhFailure(created.failure, tooBig, true)
   return { ...CLEAN, fetched: true, tooBig, pr: refOf(created.value) }
 }

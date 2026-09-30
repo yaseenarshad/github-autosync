@@ -61,7 +61,7 @@ describe('notice rules (D7)', () => {
   it('pending over an hour on an open PR says the PR is waiting, not that nothing reached GitHub', () => {
     const rules = createNoticeRules()
     const folder = makeFolder({ state: 'pending', pendingSince: NOW - PENDING_NOTICE_MS, pr: { number: 12, url: 'https://github.com/yasin/notes/pull/12' } })
-    expect(rules(makeStatus([folder]), NOW)).toEqual([{ folderId: 'notes', title: 'notes', body: 'Pull request #12 has been waiting to merge for over an hour.' }])
+    expect(rules(makeStatus([folder]), NOW)).toEqual([{ folderId: 'notes', title: 'notes', body: 'Changes have been waiting on pull request #12 for over an hour.' }])
   })
 
   it('never says anything about success, or about a folder the user switched off', () => {

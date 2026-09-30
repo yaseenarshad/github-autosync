@@ -1,7 +1,7 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode, PR mode (D24, D26).
 import path from 'node:path'
 import { DEBOUNCE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
-import type { Attention, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, SyncState, TooBigFile } from '@shared/types'
+import type { Attention, AttentionKind, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, SyncState, TooBigFile } from '@shared/types'
 import { webUrlOf } from './detect'
 import type { RepoPolicy } from './github'
 import type { PassResult } from './sync'
@@ -28,7 +28,9 @@ import type { PassResult } from './sync'
  *   - IDLE pulls: a pass that ended level arms a QUIET pass (`pollMs`, 60 s) — no `syncing` flash —
  *     so a folder nobody is editing still receives the other computers' changes. Never while edits
  *     settle (their pass is coming), never after a failure (the retry, or the user, owns that).
- *     Conflict copies do not stop it: keep-both already settled the conflict.
+ *     Conflict copies do not stop it: keep-both already settled the conflict. Nor does a zero-write
+ *     refusal the user settles outside the app (a closed PR, the other app, a busy repo): the poll
+ *     is how the folder notices.
  *   - QUIT flushes: commit and a short-capped push, no fetch.
  *   - PR MODE (the repo's rules say so, D22): the debounce is `prQuietMs` (5 min) — one PR per
  *     sitting, not per save — and a quiet pass never sends (D24). While a batch's PR is open the
@@ -246,8 +248,16 @@ function apply(e: Entry, res: PassResult): void {
 
 /** A host that throws is classified like any other failure — a rejection would take out a timer's `void` call. */
 function crashed(err: unknown): PassResult {
+  // Spelled out rather than built on `pass.ts`'s CLEAN: the manager stays free of the git modules (a fake host tests it).
   return { attention: { kind: 'error', detail: String(err) }, offline: false, fetched: false, level: false, tooBig: [], alsoSyncedBy: null, facts: null, policy: null, pr: null }
 }
+
+/**
+ * Zero-write refusals the user settles outside the app — a PR decided on GitHub, the other app's
+ * switch turned off, a rebase finished — so the idle poll keeps looking. `no-gh`, `auth` and
+ * `error` wait for the user's next edit, wake or Sync now, as before.
+ */
+const SETTLED_OUTSIDE: ReadonlySet<AttentionKind> = new Set(['pr-closed', 'other-app', 'busy-repo'])
 
 export function createSyncManager(host: SyncHost): SyncManager {
   const quietMs = host.quietMs ?? DEBOUNCE_MS
@@ -325,7 +335,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
         if (res.pr !== null) armPoll(e, prCheckMs)
         // Something left to send: saved while the pass ran, or a quiet pass landed a batch it may not send (D24).
         else if (!stopped && e.pending.length > 0) armDebounce(e)
-        else if (res.level) armPoll(e, pollMs)
+        // Level, or refused with zero writes for something the user settles outside the app: look again quietly.
+        else if (res.level || (res.attention !== null && SETTLED_OUTSIDE.has(res.attention.kind))) armPoll(e, pollMs)
       }
       host.onChange()
     }
@@ -340,14 +351,13 @@ export function createSyncManager(host: SyncHost): SyncManager {
 
   /**
    * Sends in `quietMs` (`prQuietMs` in PR mode), pushed back by every call — and the idle poll stands
-   * down: the send is coming. An open PR's check keeps running: it lands the batch whatever the user types.
+   * down: the send is coming. Never while a batch's PR is open: its check commits the edits and keeps
+   * running, and landing the batch arms the send.
    */
   function armDebounce(e: Entry): void {
-    if (e.debounce !== null) clearTimeout(e.debounce)
-    if (e.pr === null && e.poll !== null) {
-      clearTimeout(e.poll)
-      e.poll = null
-    }
+    if (e.pr !== null) return
+    for (const timer of [e.debounce, e.poll]) if (timer !== null) clearTimeout(timer)
+    e.poll = null
     const ms = publishVia(e) === 'pr' ? prQuietMs : quietMs
     e.sendAt = Date.now() + ms
     e.debounce = arm(ms, () => {
@@ -383,7 +393,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
             // Undone before it was sent: nothing to send, so back to idling.
             clearTimeout(e.debounce)
             e.debounce = e.sendAt = null
-            if (e.poll === null) armPoll(e, pollMs)
+            armPoll(e, pollMs)
           }
           host.onChange()
         })
@@ -453,7 +463,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
 
     async resend(id) {
       const e = entries.get(id)
-      if (e === undefined || !e.active) return
+      if (e === undefined || !e.active || e.attention?.kind !== 'pr-closed') return
       // No need to wait out a running pass: one that finds the PR closed writes nothing.
       await host.forgetInFlight(e.cfg.path)
       await requestPass(e, 'normal')

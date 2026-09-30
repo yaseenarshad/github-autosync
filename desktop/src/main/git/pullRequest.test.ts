@@ -1,15 +1,17 @@
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clone, fakeGitHub, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, shPath, snapshot, type BareRemote, type FakeGitHub, type GitRepo } from './gitFixture'
-import type { RepoPolicy } from './github'
+import type { GitHubRepo, RepoPolicy } from './github'
 import { readActivity } from './activity'
 import { forgetInFlight, IN_FLIGHT } from './pullRequest'
 import { syncFolder, type PassOptions } from './sync'
 
 /**
- * Acceptance proofs for PR publishing (YAZ-2250, catalog S1–S31). Real git against a bare remote;
- * GitHub is `fakeGitHub`, whose `merge` is the repo's Action (a real squash into the bare repo).
+ * Acceptance proofs for PR publishing (YAZ-2250; the numbers are the "Scenario catalog" comment on
+ * that issue). Covered here: S2, S3, S4, S6, S8–S13, S15, S16, S19–S23, S25, S27, S29, S31, plus
+ * offline mid-check and mid-close. Real git against a bare remote; GitHub is `fakeGitHub`, whose
+ * `merge` is the repo's Action (a real squash into the bare repo).
  */
 
 const cleanups: Array<() => Promise<void>> = []
@@ -257,6 +259,50 @@ describe('PR publishing (YAZ-2250)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(await repo.run(['log', '-1', '--format=%s'])).toBe('sync (Mac-A): a.md')
     expect(await remoteBranches(repo, remote)).toEqual(before)
     expect(gh.prs()).toHaveLength(0)
+  })
+
+  it('S13: a flush with the rules unknown asks GitHub nothing', async () => {
+    const { repo, remote, gh } = await setup()
+    await ruleOnMain(remote)
+    const api = gh.repo(remote.url) as GitHubRepo
+    const spies = (['policy', 'findPr', 'createPr', 'closePr'] as const).map((method) => vi.spyOn(api, method))
+    await repo.write('a.md', 'a\n')
+
+    await pass(repo, gh, { flush: true })
+
+    expect(spies.flatMap((spy) => spy.mock.calls)).toEqual([])
+    expect(await repo.run(['log', '-1', '--format=%s'])).toBe('sync (Mac-A): a.md')
+  })
+
+  it('offline while checking the PR is offline, and the batch stays in flight', async () => {
+    const { repo, gh } = await setup()
+    await repo.write('a.md', 'a\n')
+    await pass(repo, gh)
+    gh.failWith({ kind: 'offline', detail: 'error connecting to api.github.com' })
+
+    // The rules as the manager keeps them: an offline read would otherwise mean push mode.
+    expect(await pass(repo, gh, { policy: PR_RULE })).toMatchObject({ attention: null, offline: true, pr: null })
+    expect(await inFlight(repo)).toBe(await head(repo))
+  })
+
+  it('offline while closing a conflicting PR is offline; the next pass replaces it', async () => {
+    const { repo: a, remote, gh } = await setup()
+    const b = await teammate(remote)
+    await a.write('note.md', 'from A\n')
+    await b.write('note.md', 'from B\n')
+    await syncFolder(b.root, { host: 'Mac-B', github: gh })
+    await pass(a, gh)
+    expect(await gh.merge(1)).toBe(true)
+    const batch = await inFlight(a)
+    const close = vi.spyOn(gh.repo(remote.url) as GitHubRepo, 'closePr').mockResolvedValueOnce({ ok: false, failure: { kind: 'offline', detail: 'error connecting to api.github.com' } })
+
+    expect(await pass(a, gh)).toMatchObject({ attention: null, offline: true })
+    expect(await inFlight(a)).toBe(batch)
+    expect(gh.prs()[1]).toMatchObject({ state: 'OPEN' })
+
+    expect(await pass(a, gh)).toMatchObject({ offline: false, pr: { number: 3 } })
+    expect(close).toHaveBeenCalledTimes(2)
+    expect(gh.prs()[1]).toMatchObject({ state: 'CLOSED' })
   })
 
   it('S20: a bookmark that is no longer under HEAD is dropped without rewriting history', async () => {

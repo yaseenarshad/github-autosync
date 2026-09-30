@@ -1,7 +1,7 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.test.ts (+ classifyGitFailure cases from sync.test.ts); changes: findGit, identity class, no installGitHint.
 import { afterEach, describe, expect, it } from 'vitest'
 import { rm } from 'node:fs/promises'
-import { GIT_CANDIDATES, GIT_TIMEOUT_CODE, classifyGitFailure, findGit, firstMeaningfulLine, git, gitCandidates, resolveGit, type GitResult } from './exec'
+import { GIT_CANDIDATES, GIT_TIMEOUT_CODE, classifyGitFailure, findGit, firstMeaningfulLine, git, gitCandidates, resolveBin, type GitResult } from './exec'
 import { requireGit, tempDir as makeTemp } from './gitFixture'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -16,14 +16,14 @@ async function tempDir(): Promise<string> {
   return dir
 }
 
-describe('resolveGit / findGit', () => {
+describe('resolveBin / findGit', () => {
   it('returns null when no candidate exists', async () => {
-    expect(await resolveGit(['/nope/bin/git', '/also/nope/git'])).toBeNull()
+    expect(await resolveBin(['/nope/bin/git', '/also/nope/git'])).toBeNull()
     expect(await findGit(['/nope/bin/git'])).toBeNull()
   })
 
   it('ignores a candidate that is a directory rather than a binary', async () => {
-    expect(await resolveGit([await tempDir()])).toBeNull()
+    expect(await resolveBin([await tempDir()])).toBeNull()
   })
 
   it('finds this machine’s git among the defaults, and it runs', async () => {

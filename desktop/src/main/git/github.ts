@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { firstMeaningfulLine, git, GIT_TIMEOUT_CODE, resolveGit, type GitResult } from './exec'
+import { firstMeaningfulLine, git, GIT_TIMEOUT_CODE, resolveBin, type GitResult } from './exec'
 import { webUrlOf } from './detect'
 
 /**
@@ -34,7 +34,7 @@ export type GhResult<T> = { ok: true; value: T } | { ok: false; failure: GhFailu
 
 export interface GitHubRepo {
   policy(): Promise<GhResult<RepoPolicy>>
-  /** The newest PR whose head is `branch`, in any state; null when there is none. */
+  /** The PR whose head is `branch`: an OPEN one if there is one (gh prefers it), else the newest in any state; null when there is none. */
   findPr(branch: string): Promise<GhResult<PullRequest | null>>
   createPr(pr: { head: string; base: string; title: string; body: string }): Promise<GhResult<PullRequest>>
   /** Closes with a comment and deletes the PR's branch. */
@@ -72,20 +72,22 @@ const GH_CANDIDATES = ghCandidates()
  * Looked up on every call, like git, so installing gh is noticed without a restart.
  */
 const runGh: GhRun = async (args) => {
-  const bin = await resolveGit(GH_CANDIDATES)
+  const bin = await resolveBin(GH_CANDIDATES)
   if (bin === null) return null
-  return git(bin, path.parse(process.cwd()).root, args, { env: GH_ENV }).catch(() => null)
+  // Only a missing gh is `no-gh`; one that exists but will not start (permissions, a broken install) is an error in its own words.
+  return git(bin, path.parse(process.cwd()).root, args, { env: GH_ENV }).catch((err: unknown) => ({ code: 1, stdout: '', stderr: String(err) }))
 }
 
 const GH_OFFLINE = /error connecting|no such host|dial tcp|timeout|timed out/i
 
-/** Missing or logged out → `no-gh`; the network → `offline`; a refused token → `auth`; else gh's own words. */
+/** Missing or logged out → `no-gh`; the network or a rate limit → `offline`; a refused token → `auth`; else gh's own words. */
 export function classifyGhFailure(res: GitResult | null): GhFailure {
   if (res === null) return { kind: 'no-gh', detail: 'GitHub CLI (gh) is not installed.' }
   const text = `${res.stderr}\n${res.stdout}`
-  const detail = firstMeaningfulLine(res)
+  const detail = firstMeaningfulLine(res, 'gh')
   if (/gh auth login|not logged/i.test(text)) return { kind: 'no-gh', detail }
-  if (res.code === GIT_TIMEOUT_CODE || GH_OFFLINE.test(text)) return { kind: 'offline', detail }
+  // A rate limit (often a 403) passes with time: retry quietly rather than ask the user to sign in again.
+  if (res.code === GIT_TIMEOUT_CODE || GH_OFFLINE.test(text) || /rate limit/i.test(text)) return { kind: 'offline', detail }
   if (/\b401\b|bad credentials|\b403\b/i.test(text)) return { kind: 'auth', detail }
   return { kind: 'error', detail }
 }
@@ -96,7 +98,7 @@ function answer<T>(res: GitResult | null, parse: (stdout: string) => T): GhResul
   try {
     return { ok: true, value: parse(res.stdout) }
   } catch {
-    return { ok: false, failure: { kind: 'error', detail: `gh answered unexpectedly: ${firstMeaningfulLine(res)}` } }
+    return { ok: false, failure: { kind: 'error', detail: `gh answered unexpectedly: ${firstMeaningfulLine(res, 'gh')}` } }
   }
 }
 

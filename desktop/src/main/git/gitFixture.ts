@@ -1,8 +1,8 @@
-// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/gitFixture.ts; changes: realpath'd temp dirs, `clone` helper, byte snapshot, no storage-worker bundle.
+// Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/gitFixture.ts; changes: realpath'd temp dirs, `clone` helper, byte snapshot, no storage-worker bundle, `fakeGitHub` (PR publishing), `forgetInFlight` on the host.
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { GIT_CANDIDATES, git, resolveGit } from './exec'
+import { GIT_CANDIDATES, git, resolveBin } from './exec'
 import type { GitHub, GitHubRepo, GhFailure, PullRequest, RepoPolicy } from './github'
 import type { SyncHost } from './manager'
 import { forgetInFlight } from './pullRequest'
@@ -41,7 +41,7 @@ export const REAL_GIT_TIMEOUT_MS = 20_000
 
 /** The machine's git, or a clear failure — these tests cannot run without one. */
 export async function requireGit(): Promise<string> {
-  const bin = await resolveGit()
+  const bin = await resolveBin()
   if (bin === null) throw new Error(`no git found at ${GIT_CANDIDATES.join(' or ')}; the git tests need a real one`)
   return bin
 }
@@ -205,6 +205,8 @@ export async function fakeGitHub(remote: BareRemote, policy: RepoPolicy = { defa
 
   async function mergeable(pr: FakePr): Promise<PullRequest['mergeable']> {
     const res = await onRemote(['merge-tree', '--write-tree', pr.base, pr.head])
+    // 1 is a conflict; anything else (an old git without `--write-tree`, a missing ref) is a broken fixture, not an answer.
+    if (res.code !== 0 && res.code !== 1) throw new Error(`git merge-tree --write-tree exited ${res.code}: ${res.stderr.trim()}`)
     return res.code === 0 ? 'MERGEABLE' : 'CONFLICTING'
   }
 

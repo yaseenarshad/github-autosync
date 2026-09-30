@@ -66,7 +66,7 @@ export function createNoticeRules(): (status: AppStatus, now: number) => Notice[
     mem.kind = kind
     mem.copies = copies
     if (f.pendingSince !== null && now - f.pendingSince >= PENDING_NOTICE_MS && mem.pendingSince !== f.pendingSince) {
-      const body = f.pr !== null ? `Pull request #${f.pr.number} has been waiting to merge for over an hour.` : 'Changes on this computer have not reached GitHub for over an hour.'
+      const body = f.pr !== null ? `Changes have been waiting on pull request #${f.pr.number} for over an hour.` : 'Changes on this computer have not reached GitHub for over an hour.'
       out.push({ folderId: f.id, title: f.name, body })
       mem.pendingSince = f.pendingSince
     }

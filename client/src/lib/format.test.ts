@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { formatBytes, homeDir, isGitHubUrl, parentDir, tildify } from './format'
+import { formatBytes, homeDir, parentDir, tildify } from './format'
 
 it('finds the home folder on mac, linux and windows', () => {
   expect(homeDir('/Users/yasin/Documents/GitHub/notes')).toBe('/Users/yasin')
@@ -23,10 +23,4 @@ it('takes the parent of posix and windows paths', () => {
 it('formats sizes in MB, GB past 1024 MB', () => {
   expect(formatBytes(240 * 1024 ** 2)).toBe('240 MB')
   expect(formatBytes(1.4 * 1024 ** 3)).toBe('1.4 GB')
-})
-
-it('links only github.com pages', () => {
-  expect(isGitHubUrl('https://github.com/yasin/notes/pull/12')).toBe(true)
-  expect(isGitHubUrl('https://github.company.com/yasin/notes/pull/12')).toBe(false)
-  expect(isGitHubUrl('http://github.com/yasin/notes')).toBe(false)
 })

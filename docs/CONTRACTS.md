@@ -61,7 +61,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `checkFolder` — the add-folder verdict (D12). The checks run in this order: no-git, not-git, not-root (with `root`), already-added, no-origin, auth. Offline is still `ok`.
   - `addFolder`, `removeFolder`, `setFolderEnabled`, `setPaused`, `setLaunchAtLogin`, `setTheme`, `setAlias` — mutations. `removeFolder` never touches files. A null alias clears the nickname.
   - `syncNow(id | null)` — resolves when the passes are done. Null means every active folder.
-  - `resendPullRequest(id)` — D25 "Send again": forgets the closed batch (`refs/autosync/in-flight`), then a normal pass sends its commits as a fresh PR. Resolves when the pass is done; an inactive folder is a no-op.
+  - `resendPullRequest(id)` — D25 "Send again": forgets the closed batch (`refs/autosync/in-flight`), then a normal pass sends its commits as a fresh PR. Resolves when the pass is done. A no-op unless the folder is active and its attention is `pr-closed`.
   - `activity(id, cursor?)` — 200 commits a page, newest first. `cursor` is the number of commits to skip.
   - `showInFinder`, `openInTerminal`, `openInEditor` (`vscode://file/…`) — throw when the folder is gone.
   - `openExternal` — opens `https://github.com/…` only.
@@ -72,7 +72,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 ## 3. Sync algorithm (`sync.ts`, one pass that never throws)
 
 1. **Refuse** with zero writes, in this order: a busy repo (D16), a folder the Docs/Draw app syncs (D27), a repo with no `origin`.
-   - Then the **rules** (D22): the manager's last known `policy`, else `github.repo(origin).policy()`. Not GitHub, or gh could not say → push mode (not cached).
+   - Then the **rules** (D22): the manager's last known `policy`, else `github.repo(origin).policy()` (the repo's rulesets). Not GitHub, gh could not say, or the quit flush (which never asks GitHub) → push mode, not cached.
    - Rules require PRs and the folder is not on the default branch → `busy-repo` `side-branch`, zero writes (D29).
 2. **Commit.** Untracked and modified files of 95 MiB or more are excluded from `add -A` by literal pathspec, so they are never hashed. Anything staged over the line afterwards is unstaged. The rest becomes one commit, `sync (<host>): a.md, b.md, c.md +N more`.
 3. **Fetch** `origin` (10-minute transfer budget). Skipped on the quit flush.
@@ -82,7 +82,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
    - Saves made while the rebase was stopped are parked and put back.
    - Anything unexpected aborts the rebase back to the starting tree.
 5. **Push.** `-u origin HEAD` on the first push. A push that lost a race to another computer re-runs the exchange once. The quit flush uses a 5 s push cap.
-   - A push refused by a rule (`GH013`, `GH006`, "must be made through a pull request", "protected branch") re-reads the rules in the same pass: PRs required → the PR route now (or `side-branch`); gh cannot say → `no-gh`.
+   - A push refused by a ruleset (`GH013`, "…through a pull request") re-reads the rules in the same pass (not on the quit flush): PRs required → the PR route now (or `side-branch`); gh cannot say → its failure, classified as in 7 below (`no-gh` when it is missing or logged out).
 6. **Classify failures.**
    - A timeout counts as offline.
    - Auth is checked before offline, because git wraps most auth failures in the offline envelope.
@@ -92,17 +92,17 @@ How the app behaves, in one place. The code is the source of truth; this names w
 **PR route** (`pullRequest.ts`, D23), replacing steps 3–5 when the rules require PRs on this branch:
 
 1. The quit flush stops after the commit (S13).
-2. **Fetch** `--prune origin`.
-3. **A batch in flight** (`refs/autosync/in-flight` exists): no rebase, no push — only `findPr(autosync/<sha12>)`.
+2. **A batch in flight** (`refs/autosync/in-flight` exists): `findPr(autosync/<sha12>)` FIRST, then **fetch** `--prune origin` — so a MERGED answer always meets an `@{u}` that holds its squash. Nothing in flight → just the fetch.
+3. The batch's PR decides; no rebase, no push:
    - None yet → finish the send (a pass that died mid-send, S11). Quiet passes wait.
    - OPEN, mergeable or `UNKNOWN` → wait (`pr` set).
-   - OPEN, `CONFLICTING` → `closePr` with "Replaced by a newer batch from AutoSync: this one conflicted with main." (deletes its branch), drop the ref, carry on at 4 (D25). A close that fails means it merged meanwhile: wait.
+   - OPEN, `CONFLICTING` → `closePr` with "Replaced by a newer batch from AutoSync: this one conflicted with main." (deletes its branch), then drop the ref and carry on at 4 (D25). A close that fails keeps the ref and classifies like any gh failure (offline → the quiet retry).
    - MERGED → if the ref is an ancestor of HEAD, `rebase --onto @{u} <ref>` keep-both (the squash stands in for the batch; later commits replay). Either way drop the ref (S20: never rewrite a history the user moved).
    - CLOSED → `pr-closed`; the ref stays.
 4. **Receive:** rebase onto `@{u}` when behind, keep-both, as in step 4.
 5. Nothing ahead → level. Commits that net to nothing (`diff --quiet @{u} HEAD`) → `reset --soft @{u}`, level, no PR (S10).
-6. **Send** (never on a quiet pass, D24), each step idempotent: `update-ref` the ref to HEAD → `push origin <sha>:refs/heads/autosync/<sha12>` → `findPr`, and `createPr` unless one is OPEN. Base = default branch; title = `commitMessage(host, the batch's files)`, so the squash subject `sync (<host>): a.md (#N)` still reads as a sync in Activity; body = the files, one per line. Nothing is pushed to a batch's branch once its PR exists.
-7. gh failures classify like git's: `offline` → offline, `no-gh` / `auth` / `error` → attention with gh's words.
+6. **Send** (never on a quiet pass, D24), each step idempotent: `update-ref` the ref to HEAD → `push origin <sha>:refs/heads/autosync/<sha12>` → `findPr`, and `createPr` unless one is OPEN. Base = default branch; title = `commitMessage(host, the batch's files)`, so the squash subject `sync (<host>): a.md (#N)` still reads as a sync in Activity; body = the files, one per line (the first 50, then "…and N more"). Nothing is pushed to a batch's branch once its PR exists.
+7. gh failures classify like git's: `offline` (the network, a timeout, a rate limit) → offline, `no-gh` / `auth` / `error` → attention with gh's words. Only a missing gh binary is `no-gh` without them.
 
 ## 4. Triggers and cadence (`manager.ts`, numbers in `shared/status.ts`)
 
@@ -113,14 +113,15 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - A clean look (an ignored file, or an edit undone) cancels the send.
 - **Own writes:** watcher events during a pass, or within 1 s of one (`OWN_WRITES_MS`), are ignored. An edit made during a pass is caught by the pass's closing status.
 - **Offline:** exactly one retry after 2 min (`OFFLINE_RETRY_MS`).
-- **Idle:** a pass that ended level arms a quiet pull after 60 s (`POLL_MS`). Conflict copies do not stop it. Any other attention, offline, or edits that are settling do.
+- **Idle:** a pass that ended level arms a quiet pull after 60 s (`POLL_MS`). Conflict copies do not stop it, nor do the zero-write refusals the user settles outside the app (`pr-closed`, `other-app`, `busy-repo`): the poll is how the folder notices. Any other attention (`no-gh`, `auth`, `no-identity`, `error`), offline, or edits that are settling do.
 - **Wake / unlock:** a pull, unless a pass ran in the last 10 s (`WAKE_COOLDOWN_MS`).
 - **Quit:** the watchers close, then each folder gets a flush pass (commit plus a capped push; commit only in PR mode). The quit is held for at most 15 s.
 - **PR mode** (D24, D26):
   - The debounce is 5 min (`PR_QUIET_MS`): one PR per sitting, not per save.
   - Quiet passes (the idle poll and the PR check) never send. They may land a merged batch and receive; one that leaves changes unsent arms the debounce.
   - While a PR is open, a quiet check runs every 15 s (`PR_CHECK_MS`) instead of the idle poll.
-  - The rules are cached per folder from each pass; only a successful read replaces them, and turning the folder off forgets them.
+  - An edit while a PR is open arms no debounce: the PR check commits it, and landing the batch arms the send.
+  - The rules are read once per activation and kept per folder; only a successful read replaces them, and turning the folder off forgets them. A refused push re-reads them at once; a removed rule or a renamed default branch applies after a restart or an off/on toggle.
 - **Invariants:**
   - One pass at a time per folder. A burst of triggers during a pass collapses into one follow-up that runs the strongest mode requested (flush > normal > quiet).
   - Off means off: a disabled folder, or any folder while paused, has no watcher, no timers and no git.
@@ -157,11 +158,11 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D19** — Theme System/Light/Dark for the window.
 - **D20** — The menu bar icon is a big status dot (grey ring with no folders); paused is red with ⏸; the octopus stays the app icon.
 - **D21** — PR publishing lives in AutoSync only.
-- **D22** — Push or PR is the repo's rules' call, never a setting: PR mode when the default branch has a `pull_request` rule and the folder is on it. No rule, or not GitHub → push mode, exactly as before.
+- **D22** — Push or PR is the repo's rules' call, never a setting: PR mode when the default branch's rulesets include a `pull_request` rule and the folder is on it. No rule, or not GitHub → push mode, exactly as before.
 - **D23** — One immutable branch and PR per batch (`autosync/<sha12>`), marked by the local ref `refs/autosync/in-flight`; the repo's Action squash-merges it. While it is in flight: no rebase, no push. Merged → land it and send the next.
 - **D24** — PR mode waits 5 min after the last edit; quiet passes never send.
 - **D25** — A PR that conflicts is closed and replaced by a keep-both replay. One a human closed asks the user ("Send again"), never re-sent on its own.
 - **D26** — A folder with a PR open is `pending`, and shows the PR.
 - **D27** — A folder the Docs or Draw app syncs gets `other-app` and zero writes, in both modes. Add folder still only warns.
 - **D28** — GitHub calls go through the user's own `gh` (explicit paths, `-R owner/repo`, run from the filesystem root, prompts off). Missing or logged out → `no-gh`.
-- **D29** — A side branch of a PR-rule repo is never touched (`busy-repo` `side-branch`).
+- **D29** — A side branch of a PR-rule repo is never touched once the rules are known (`busy-repo` `side-branch`).

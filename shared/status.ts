@@ -29,6 +29,11 @@ export const SENDS_AFTER = `${DEBOUNCE_MS / 1000}s after you stop editing`
 export const OPENS_PR_AFTER = `${PR_QUIET_MS / 60_000} minutes after you stop editing`
 export const CHECKS_EVERY = POLL_MS === 60_000 ? 'every minute' : `every ${POLL_MS / 1000}s`
 
+// ---------- links ----------
+
+/** The one site the app opens in a browser (`openExternal`) — so also the only URLs the window renders as links. */
+export const isGitHubUrl = (url: string): boolean => url.startsWith('https://github.com/')
+
 // ---------- worst state ----------
 
 /** Worst first: what needs the user, then what is waiting, then what is moving, then what is fine, then what is off. */
