@@ -89,18 +89,18 @@ export function createFakeApi(): AutoSyncApi {
     launchAtLogin: true,
     theme: 'system',
     folders: [
-      folder('skills-global-yaseen', 'Documents/GitHub', {
+      folder('team-skills', 'Documents/GitHub', {
         state: 'attention',
         attention: { kind: 'conflict', conflicts },
         ignored: { patterns: ['node_modules/', '.venv/', '__pycache__/', '.DS_Store'], count: 1043 },
       }),
-      folder('yaseen-docs-vault', 'Documents/GitHub', {
+      folder('notes-vault', 'Documents/GitHub', {
         state: 'attention',
         attention: { kind: 'other-app', detail: 'Docs' },
         alsoSyncedBy: 'Docs',
         lastSyncedAt: now - 2 * MIN,
       }),
-      folder('YasinContentForge1', 'Documents/GitHub', { state: 'syncing', direction: 'up' }),
+      folder('content-studio', 'Documents/GitHub', { state: 'syncing', direction: 'up' }),
       folder('journal-notes', 'Documents/GitHub', {
         state: 'pending',
         pending: [
@@ -114,11 +114,11 @@ export function createFakeApi(): AutoSyncApi {
       folder('course-media', 'Documents/GitHub', { tooBig: [{ path: 'raw/lesson-04.mov', bytes: 240 * 1024 ** 2 }] }),
       folder('client-wiki', 'Documents/GitHub', {
         state: 'attention',
-        attention: { kind: 'auth', detail: "fatal: Authentication failed for 'https://github.com/growprofit/client-wiki.git/'" },
+        attention: { kind: 'auth', detail: "fatal: Authentication failed for 'https://github.com/example-co/client-wiki.git/'" },
         pending: [{ status: 'M', path: 'clients/acme/onboarding.md' }],
         lastSyncedAt: now - 48 * HOUR,
       }),
-      folder('solomon-config', 'yaseen-os', {
+      folder('dotfiles', 'Projects', {
         state: 'attention',
         attention: { kind: 'busy-repo', detail: 'rebase' },
         lastSyncedAt: now - 6 * HOUR,
@@ -145,7 +145,7 @@ export function createFakeApi(): AutoSyncApi {
         pending: [{ status: 'A', path: 'clients/acme.md' }],
         lastSyncedAt: now - 3 * HOUR,
       }),
-      folder('drafts', 'yaseen-os', { enabled: false, state: 'off', lastSyncedAt: now - 9 * 24 * HOUR }),
+      folder('drafts', 'Projects', { enabled: false, state: 'off', lastSyncedAt: now - 9 * 24 * HOUR }),
     ],
   }
   const conflictCommit: ActivityEntry = {
@@ -168,7 +168,7 @@ export function createFakeApi(): AutoSyncApi {
     files: [{ status: 'R', path: 'skills/README.md' }],
   }
   const log = new Map<string, ActivityEntry[]>([
-    ['skills-global-yaseen', [conflictCommit, ...history(now), manualCommit].sort((a, b) => b.time - a.time)],
+    ['team-skills', [conflictCommit, ...history(now), manualCommit].sort((a, b) => b.time - a.time)],
   ])
   const statusListeners = new Set<(s: AppStatus) => void>()
 
