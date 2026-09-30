@@ -8,10 +8,9 @@ import { forgetInFlight, IN_FLIGHT } from './pullRequest'
 import { syncFolder, type PassOptions } from './sync'
 
 /**
- * Acceptance proofs for PR publishing (YAZ-2250; the numbers are the "Scenario catalog" comment on
- * that issue). Covered here: S2, S3, S4, S6, S8–S13, S15, S16, S19–S23, S25, S27, S29, S31, plus
- * offline mid-check and mid-close. Real git against a bare remote; GitHub is `fakeGitHub`, whose
- * `merge` is the repo's Action (a real squash into the bare repo).
+ * Acceptance proofs for PR publishing (docs/CONTRACTS.md §3, D21–D29). Each test is named for the
+ * scenario it pins (S2, S3, …) so a failure points at one behaviour. Real git against a bare
+ * remote; GitHub is `fakeGitHub`, whose `merge` is the repo's Action (a real squash into the bare repo).
  */
 
 const cleanups: Array<() => Promise<void>> = []
@@ -54,7 +53,7 @@ async function ruleOnMain(remote: BareRemote): Promise<void> {
   )
 }
 
-describe('PR publishing (YAZ-2250)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
+describe('PR publishing', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
   it('S2: a repo without a PR rule keeps pushing straight to main', async () => {
     const { repo, remote, gh } = await setup({ defaultBranch: 'main', requiresPr: false })
     await repo.write('a.md', 'a\n')
