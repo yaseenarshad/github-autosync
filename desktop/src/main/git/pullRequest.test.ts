@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { clone, fakeGitHub, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, shPath, snapshot, type BareRemote, type FakeGitHub, type GitRepo } from './gitFixture'
 import type { RepoPolicy } from './github'
+import { readActivity } from './activity'
 import { forgetInFlight, IN_FLIGHT } from './pullRequest'
 import { syncFolder, type PassOptions } from './sync'
 
@@ -145,6 +146,10 @@ describe('PR publishing (YAZ-2250)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(await a.read('b.md')).toBe('b\n')
     expect(await head(a)).toBe(await head(b))
     expect(await remoteHead(a, remote)).toBe(await head(a))
+    // The squash subjects `sync (<host>): … (#N)` still read as sent here and received there (D10).
+    const kinds = async (repo: GitRepo, host: string) => (await readActivity(repo.root, host)).entries.slice(0, 2).map((e) => `${e.kind} ${e.host}`)
+    expect(await kinds(a, 'Mac-A')).toEqual(['received Mac-B', 'sent Mac-A'])
+    expect(await kinds(b, 'Mac-B')).toEqual(['sent Mac-B', 'received Mac-A'])
   })
 
   it('S23: a PR that conflicts with a teammate’s merge is replaced; both versions survive', async () => {
