@@ -3,7 +3,7 @@
   "productName": "GitHub AutoSync",
   "private": true,
   "author": "Yasin Arshad",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GitHub AutoSync — Electron shell (main + preload); the renderer is ../client",
   "main": "out/main/index.js",
   "scripts": {

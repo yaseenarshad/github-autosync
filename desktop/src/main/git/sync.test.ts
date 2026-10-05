@@ -1,14 +1,15 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.test.ts; changes: AutoSync result shape and subjects, busy-repo, identity, keep-both, empty clone, push race; .DS_Store cases dropped.
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync } from 'node:fs'
 import { readFile, rm, truncate, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
-import { clone, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
-import { commitMessage, TRANSFER_TIMEOUT_MS } from './pass'
-import { hostName, syncFolder, TOO_BIG_BYTES, type PassOptions } from './sync'
+import { clone, lateSave, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
+import { commitMessage, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
+import { hostName, syncFolder, type PassOptions } from './sync'
 
 // Real git throughout; the spy only records what each call was given.
 vi.mock('./exec', async (actual) => {
@@ -236,27 +237,48 @@ describe('busy repo (D16): zero writes', { timeout: REAL_GIT_TIMEOUT_MS }, () =>
     expect((await git(bin, repo.root, ['rev-parse', 'HEAD'])).stdout).toBe(head.stdout)
   }
 
-  async function divergedRepo(): Promise<GitRepo> {
-    const { repo } = await pushedRepo()
+  async function divergedRepo(): Promise<{ repo: GitRepo; remote: BareRemote }> {
+    const { repo, remote } = await pushedRepo()
     await repo.run(['checkout', '-q', '-b', 'side'])
     await repo.write('note.md', 'side\n')
     await repo.run(['commit', '-qam', 'side'])
     await repo.run(['checkout', '-q', 'main'])
     await repo.write('note.md', 'main\n')
     await repo.run(['commit', '-qam', 'main'])
-    return repo
+    return { repo, remote }
   }
 
   it('mid-rebase', async () => {
-    const repo = await divergedRepo()
+    const { repo } = await divergedRepo()
     expect((await git(bin, repo.root, ['rebase', 'side'])).code).not.toBe(0)
     await assertUntouched(repo, 'rebase')
   })
 
   it('mid-merge', async () => {
-    const repo = await divergedRepo()
+    const { repo } = await divergedRepo()
     expect((await git(bin, repo.root, ['merge', 'side'])).code).not.toBe(0)
     await assertUntouched(repo, 'merge')
+  })
+
+  it('a merge the user starts while the pass is fetching: nothing of theirs is written over', async () => {
+    const { repo, remote } = await divergedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    const head = await repo.run(['rev-parse', 'HEAD'])
+    let merging = ''
+
+    const res = await pass(repo, {
+      onDirection: (d) => {
+        if (d !== 'down') return
+        spawnSync(bin, ['merge', 'side'], { cwd: repo.root })
+        merging = readFileSync(path.join(repo.root, 'note.md'), 'utf8')
+      },
+    })
+
+    expect(res.attention).toEqual({ kind: 'busy-repo', detail: 'merge' })
+    expect(merging).toContain('<<<<<<<')
+    expect(await repo.read('note.md')).toBe(merging)
+    expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+    expect(await repo.run(['status', '--porcelain'])).toBe('UU note.md')
   })
 
   it('detached HEAD', async () => {
@@ -464,6 +486,155 @@ describe('files too big for GitHub (D11)', { timeout: REAL_GIT_TIMEOUT_MS }, () 
     expect((await pass(repo)).tooBig).toHaveLength(1)
     await rm(path.join(repo.root, 'Huge.mov'))
     expect((await pass(repo)).tooBig).toEqual([])
+  })
+})
+
+describe('a file written while git is staging it', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
+  /** What git says when a file shrinks between its stat and its read. Nothing is staged. */
+  const SHORT_READ = { code: 128, stdout: '', stderr: 'error: short read while indexing note.md\nerror: note.md: failed to insert into database\nerror: unable to index file \'note.md\'\nfatal: adding files failed\n' }
+
+  /** Runs `body` with the first `failures` calls of `git add` answering SHORT_READ; answers how many adds were made. */
+  async function withFailingAdds(failures: number, body: () => Promise<void>): Promise<number> {
+    const real = vi.mocked(git).getMockImplementation() as typeof git
+    let adds = 0
+    vi.mocked(git).mockImplementation(async (b, root, args, opts) => {
+      if (args[0] !== 'add') return real(b, root, args, opts)
+      adds += 1
+      return adds <= failures ? SHORT_READ : real(b, root, args, opts)
+    })
+    try {
+      await body()
+    } finally {
+      vi.mocked(git).mockImplementation(real)
+    }
+    return adds
+  }
+
+  it('stages again, and the pass ends level with the save sent', async () => {
+    const { repo, remote } = await pushedRepo()
+    await repo.write('note.md', 'saved while git was reading\n')
+
+    const adds = await withFailingAdds(1, async () => {
+      expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+    })
+
+    expect(adds).toBe(2)
+    expect(await repo.run(['log', '-1', '--format=%s'])).toBe('sync (Mac-A): note.md')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('gives up after three tries, in git’s words', async () => {
+    const { repo } = await pushedRepo()
+    await repo.write('note.md', 'never readable\n')
+
+    const adds = await withFailingAdds(Infinity, async () => {
+      expect((await pass(repo)).attention).toEqual({ kind: 'error', detail: 'error: short read while indexing note.md' })
+    })
+
+    expect(adds).toBe(3)
+  })
+})
+
+describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
+  /** A `pre-rebase` hook that runs `script` on the first rebase only. git runs it once it has found the tree clean. */
+  async function onFirstRebase(repo: GitRepo, script: string): Promise<void> {
+    const hook = path.join(repo.root, '.git', 'hooks', 'pre-rebase')
+    const done = `${shPath(hook)}.done`
+    await writeFile(hook, `#!/bin/sh\n[ -f "${done}" ] && exit 0\ntouch "${done}"\n${script}\n`, { mode: 0o755 })
+  }
+
+  const rebases = () => vi.mocked(git).mock.calls.filter(([, , args]) => args[0] === 'rebase').map(([, , args]) => args.join(' '))
+
+  it('is committed, replayed and pushed in the same pass, even when nothing else was ours to push', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+
+    expect(await pass(repo, lateSave(repo, 'note.md', 'saved late\n'))).toMatchObject({ attention: null, level: true })
+
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    expect(await repo.read('note.md')).toBe('saved late\n')
+    expect(await repo.run(['status', '--porcelain'])).toBe('')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('keeps both when the other computer changed the same file', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'note.md': 'from B\n' })
+
+    const res = await pass(repo, lateSave(repo, 'note.md', 'from A, late\n'))
+
+    const copy = res.facts?.conflicts[0]?.copy ?? ''
+    expect(res).toMatchObject({ attention: { kind: 'conflict' }, level: true })
+    expect(await repo.read('note.md')).toBe('from B\n')
+    expect(await repo.read(copy)).toBe('from A, late\n')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('is left alone on disk, committed and replayed when it lands after git’s own clean check', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    await repo.write('note.md', 'edited here\n')
+    // The save lands on a file the replay must check out, so git refuses before it has begun.
+    await onFirstRebase(repo, 'echo "saved mid-rebase" > note.md')
+    vi.mocked(git).mockClear()
+
+    expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    expect(await repo.read('note.md')).toBe('saved mid-rebase\n')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+    // Nothing to settle or abort: the refused rebase never touched the save.
+    expect(rebases()).toEqual(['rebase @{u}', 'rebase @{u}'])
+  })
+
+  it('a rewrite with the same bytes is tried again, not shown as an error', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    await repo.write('note.md', 'edited here\n')
+    // Same bytes, new timestamp: git refuses the checkout, and the commit that follows finds nothing new.
+    await onFirstRebase(repo, 'touch -t 203001010000 note.md')
+
+    expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('a file rewritten after every commit leaves the folder waiting, not in error, and lands once the writer stops', async () => {
+    const { repo, remote } = await pushedRepo()
+    const b = await otherComputer(remote)
+    await pushFrom(b, { 'other.md': '# from B\n' })
+    const theirs = await b.run(['rev-parse', 'HEAD'])
+    const hook = path.join(repo.root, '.git', 'hooks', 'post-commit')
+    await writeFile(hook, '#!/bin/sh\ngit rev-parse HEAD > note.md\n', { mode: 0o755 })
+    await repo.write('a.md', 'a\n')
+
+    const res = await pass(repo)
+
+    expect(res).toMatchObject({ attention: null, offline: false, level: false })
+    expect(res.facts?.pending.map((c) => c.path)).toContain('note.md')
+    expect(existsSync(path.join(repo.root, '.git', 'rebase-merge'))).toBe(false)
+    // Three rebases refused; every rewrite is a commit, and nothing of theirs is in yet.
+    expect(await repo.run(['log', '--format=%s', '@{u}..HEAD'])).toBe(`${'sync (Mac-A): note.md\n'.repeat(4)}sync (Mac-A): a.md`)
+    expect(await repo.run(['merge-base', 'HEAD', theirs])).not.toBe(theirs)
+
+    await unlink(hook)
+    const last = await repo.read('note.md')
+    expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+    expect(await repo.read('note.md')).toBe(last)
+    expect(await repo.read('other.md')).toBe('# from B\n')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('a rebase that fails for another reason is shown in git’s words after three tries', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    await writeFile(path.join(repo.root, '.git', 'hooks', 'pre-rebase'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    vi.mocked(git).mockClear()
+
+    expect((await pass(repo)).attention).toEqual({ kind: 'error', detail: expect.stringContaining('pre-rebase hook refused') })
+
+    expect(rebases()).toEqual(['rebase @{u}', 'rebase @{u}', 'rebase @{u}'])
   })
 })
 

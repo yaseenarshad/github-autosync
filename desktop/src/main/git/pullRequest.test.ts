@@ -1,14 +1,14 @@
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clone, fakeGitHub, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, shPath, snapshot, type BareRemote, type FakeGitHub, type GitRepo } from './gitFixture'
+import { clone, fakeGitHub, lateSave, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, shPath, snapshot, type BareRemote, type FakeGitHub, type GitRepo } from './gitFixture'
 import type { GitHubRepo, RepoPolicy } from './github'
 import { readActivity } from './activity'
 import { forgetInFlight, IN_FLIGHT } from './pullRequest'
 import { syncFolder, type PassOptions } from './sync'
 
 /**
- * Acceptance proofs for PR publishing (docs/CONTRACTS.md §3, D21–D29). Each test is named for the
+ * Acceptance proofs for PR publishing (docs/CONTRACTS.md §3, D21–D30). Each test is named for the
  * scenario it pins (S2, S3, …) so a failure points at one behaviour. Real git against a bare
  * remote; GitHub is `fakeGitHub`, whose `merge` is the repo's Action (a real squash into the bare repo).
  */
@@ -128,6 +128,21 @@ describe('PR publishing', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(await remoteHead(repo, remote)).toBe(await head(repo))
     expect(await repo.read('a.md')).toBe('a\n')
     expect(await repo.read('b.md')).toBe('b\n')
+  })
+
+  // A merged batch landing under a late save is proved through the manager, in e2e/lateSaves.test.ts.
+  it('D30: a save that lands while a teammate’s merge is received still goes out as a PR', async () => {
+    const { repo: a, remote, gh } = await setup()
+    const b = await teammate(remote)
+    await b.write('b.md', 'b\n')
+    await syncFolder(b.root, { host: 'Mac-B', github: gh })
+    expect(await gh.merge(1)).toBe(true)
+
+    const res = await pass(a, gh, lateSave(a, 'note.md', 'saved late\n'))
+
+    expect(res).toMatchObject({ attention: null, level: false, pr: { number: 2 } })
+    expect(await a.read('b.md')).toBe('b\n')
+    expect(gh.prs()[1]).toMatchObject({ title: 'sync (Mac-A): note.md', state: 'OPEN' })
   })
 
   it('S22/S27: two teammates on different files both publish and both receive', async () => {
