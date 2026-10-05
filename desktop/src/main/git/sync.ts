@@ -4,7 +4,7 @@ import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, Too
 import { findGit, git } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { ghCli, type GitHub, type RepoPolicy } from './github'
-import { CLEAN, commitPending, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { CLEAN, commitPending, countAhead, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import { exchangeViaPr } from './pullRequest'
 
 /**
@@ -176,8 +176,9 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
   // ---------- 3. replay our commits on top of theirs; same-file conflicts keep both (D6) ----------
   if (behind > 0 && !flush) {
     opts.onDirection?.('down')
-    const outcome = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['@{u}'])
-    if (outcome !== null) return fromFailure(outcome, tooBig, true)
+    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
+    if (stopped !== null) return stopped
+    ahead = await countAhead(bin, root)
   }
 
   // ---------- 4. publish ----------
