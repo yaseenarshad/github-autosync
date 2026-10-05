@@ -75,6 +75,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
    - Then the **rules** (D22): the manager's last known `policy`, else `github.repo(origin).policy()` (the repo's rulesets). Not GitHub, gh could not say, or the quit flush (which never asks GitHub) → push mode, not cached.
    - Rules require PRs and the folder is not on the default branch → `busy-repo` `side-branch`, zero writes (D29).
 2. **Commit.** Untracked and modified files of 95 MiB or more are excluded from `add -A` by literal pathspec, so they are never hashed. Anything staged over the line afterwards is unstaged. The rest becomes one commit, `sync (<host>): a.md, b.md, c.md +N more`.
+   - A failed `add` is asked again, three times in all: a file being written while git reads it fails the whole add and stages nothing.
 3. **Fetch** `origin` (10-minute transfer budget). Skipped on the quit flush.
 4. **Rebase** onto `@{u}` when behind, never merge.
    - The fetch takes seconds, so each try first asks again whether the repo is busy (a merge or rebase started meanwhile → `busy-repo`, zero writes, D16), then commits whatever was saved since step 2, then rebases at once. A late save replays with the rest and is never stashed (D30).
