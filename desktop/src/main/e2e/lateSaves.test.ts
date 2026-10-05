@@ -56,30 +56,33 @@ describe('late saves through the real manager (D30, D31)', { timeout: REAL_GIT_T
     await a.sync()
     await b.sync()
 
-    // The program: rewrites A's tracked file every 20 ms, on its own clock.
+    // The program: rewrites A's tracked file every 20 ms, on its own clock. A tick is skipped while a
+    // write is in flight, and a write the OS refuses (git is replacing the file) is simply not the last one.
     let n = 0
-    let written: Promise<void> = Promise.resolve()
+    let last = FILES['cache.json']
+    let writing: Promise<void> | null = null
     const writer = setInterval(() => {
-      n += 1
-      written = written.then(() => writeFile(path.join(repo.root, 'cache.json'), `${n}\n`))
+      if (writing !== null) return
+      const next = `${(n += 1)}\n`
+      writing = writeFile(path.join(repo.root, 'cache.json'), next)
+        .then(() => void (last = next), () => undefined)
+        .finally(() => void (writing = null))
     }, 20)
-    try {
-      for (let round = 1; round <= 4; round += 1) {
-        await b.repo.write(`from-b-${round}.md`, `${round}\n`)
-        await b.sync() // A is behind again: its next pass must rebase under the writer
-        await a.sync()
-      }
-    } finally {
-      clearInterval(writer)
-      await written
+    cleanups.push(async () => clearInterval(writer))
+    for (let round = 1; round <= 4; round += 1) {
+      await b.repo.write(`from-b-${round}.md`, `${round}\n`)
+      await b.sync() // A is behind again: its next pass must rebase under the writer
+      await a.sync()
     }
+    clearInterval(writer)
+    await writing
     await a.sync()
     await b.sync()
 
     expect(a.seen.flatMap((s) => (s.attention ? [s.attention] : []))).toEqual([])
     expect(b.seen.flatMap((s) => (s.attention ? [s.attention] : []))).toEqual([])
     expect(await a.sync()).toMatchObject({ state: 'synced', pending: [] })
-    expect(await repo.read('cache.json')).toBe(`${n}\n`)
+    expect(await repo.read('cache.json')).toBe(last)
     expect(await snapshot(repo.root)).toEqual(await snapshot(bRepo.root))
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
     expect(await repo.run(['rev-list', '--merges', 'HEAD'])).toBe('')

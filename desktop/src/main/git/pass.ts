@@ -1,4 +1,4 @@
-// Moved out of sync.ts (itself copied from yaseen-draw-app@89b29c9) so pullRequest.ts shares it without an import cycle; new: `fromGhFailure`, `rebaseKeepingBoth`.
+// Moved out of sync.ts (itself copied from yaseen-draw-app@89b29c9) so pullRequest.ts shares it without an import cycle; new: `fromGhFailure`, `commitPending`, `rebaseKeepingBoth`, `countAhead`.
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { TooBigFile } from '@shared/types'
@@ -10,8 +10,9 @@ import type { PassResult } from './sync'
 
 /**
  * What both routes of a pass share — straight to the branch (`sync.ts`) or one PR per batch
- * (`pullRequest.ts`, D23): the transfer budget, the commit subject (which is also the PR title),
- * how a failure becomes a verdict, and a rebase that keeps both sides of a conflict (D6).
+ * (`pullRequest.ts`, D23): the transfer budget, the commit step and its subject (which is also the
+ * PR title), how a failure becomes a verdict, and a rebase that keeps both sides of a conflict (D6)
+ * and commits what is saved under it (D30).
  */
 
 /** A stalled transfer, not a slow one: a big folder over a home uplink can take minutes and must not restart from zero every 30 s. */
@@ -32,9 +33,6 @@ export function commitMessage(host: string, files: readonly string[]): string {
   return rest > 0 ? `sync (${host}): ${head} +${rest} more` : `sync (${host}): ${head}`
 }
 
-/** How many times `git add` is asked before its failure is believed. */
-const STAGE_TRIES = 3
-
 /** The files in `rel` at or over the line. A path that will not stat (deleted) is not. */
 async function oversize(root: string, rel: readonly string[]): Promise<TooBigFile[]> {
   const out: TooBigFile[] = []
@@ -44,6 +42,9 @@ async function oversize(root: string, rel: readonly string[]): Promise<TooBigFil
   }
   return out
 }
+
+/** How many times `git add` is asked before its failure is believed. */
+const STAGE_TRIES = 3
 
 /**
  * D11 — a file over the line must never reach a commit: GitHub refuses the WHOLE push for one
@@ -62,8 +63,9 @@ async function stageWithinLimit(bin: string, root: string): Promise<{ failed: Gi
   const held = await oversize(root, [...new Set([...untracked, ...modified])])
   const add = ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)]
   let staged = await git(bin, root, add)
-  // A file being written while git reads it fails the whole add ("short read") and stages nothing: ask again.
-  for (let left = STAGE_TRIES - 1; staged.code !== 0 && left > 0; left -= 1) staged = await git(bin, root, add)
+  // A file being written while git reads it fails the whole add ("short read") and stages nothing. So a
+  // refusal is asked again, whatever it said; a timeout (a negative code) is not.
+  for (let left = STAGE_TRIES - 1; staged.code > 0 && left > 0; left -= 1) staged = await git(bin, root, add)
   if (staged.code !== 0) return { failed: staged, tooBig: held }
   const late = await oversize(root, zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z'])))
   if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])
@@ -108,9 +110,10 @@ const REBASE_TRIES = 3
  *
  * git will not rebase over a tracked file saved after the pass's commit, and the fetch in between
  * takes seconds. So every try commits what is there and rebases at once (D30): a late save replays
- * with the rest, keep-both included, and is never stashed. A try that failed with nothing new to
- * commit failed for another reason — git's own words. A tree still being written after the last
- * try is not a problem to show anyone (D31): its saves are committed and the next pass replays them.
+ * with the rest, keep-both included, and is never stashed. After the last try the commit decides:
+ * nothing new means the rebase failed for another reason — git's own words; a tree still being
+ * written is not a problem to show anyone (D31) — its saves are committed and the next pass
+ * replays them.
  */
 export async function rebaseKeepingBoth(bin: string, root: string, host: string, args: string[]): Promise<Verdict | null> {
   let failed: GitResult | null = null
@@ -120,12 +123,13 @@ export async function rebaseKeepingBoth(bin: string, root: string, host: string,
     if (busy !== null) return { ...CLEAN, attention: { kind: 'busy-repo', detail: busy }, fetched: true }
     const late = await commitPending(bin, root, host)
     if (late.failed !== null) return fromFailure(late.failed, late.tooBig, true)
-    if (failed !== null && !late.committed) return fromFailure(failed, late.tooBig, true)
-    if (left === 0) return { ...CLEAN, fetched: true, tooBig: late.tooBig }
+    if (left === 0) return failed !== null && !late.committed ? fromFailure(failed, late.tooBig, true) : { ...CLEAN, fetched: true, tooBig: late.tooBig }
     failed = await parkWhileRebasing(bin, root, late.tooBig, async () => {
       const rebased = await git(bin, root, ['rebase', ...args])
-      if (rebased.code === 0 || (await resolveRebase(bin, root, host))) return null
-      return rebased
+      if (rebased.code === 0) return null
+      // Refused before it began (a save under it): nothing to settle or abort, and the save stays as it is on disk.
+      if ((await repoState(bin, root)).busy !== 'rebase') return rebased
+      return (await resolveRebase(bin, root, host)) ? null : rebased
     })
     if (failed === null) return null
   }

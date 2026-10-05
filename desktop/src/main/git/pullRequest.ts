@@ -87,13 +87,14 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
   // Nothing in flight: receive, then send what is ours.
   const counts = await git(bin, root, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])
   if (counts.code !== 0) return fromFailure(counts, tooBig, true)
-  const [behind = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
+  let [behind = 0, ahead = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
   if (behind > 0) {
     opts.onDirection?.('down')
     const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
     if (stopped !== null) return stopped
+    ahead = await countAhead(bin, root)
   }
-  if ((await countAhead(bin, root)) === 0) return { ...waiting(null), level: true }
+  if (ahead === 0) return { ...waiting(null), level: true }
   // S10: commits that net to nothing (an edit undone) make no PR — folded away, the tree untouched.
   if ((await git(bin, root, ['diff', '--quiet', '@{u}', 'HEAD'])).code === 0) {
     const folded = await git(bin, root, ['reset', '-q', '--soft', '@{u}'])

@@ -1,4 +1,5 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/gitFixture.ts; changes: realpath'd temp dirs, `clone` helper, byte snapshot, no storage-worker bundle, `fakeGitHub` (PR publishing), `forgetInFlight` on the host.
+import { writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -6,7 +7,7 @@ import { GIT_CANDIDATES, git, resolveBin } from './exec'
 import type { GitHub, GitHubRepo, GhFailure, PullRequest, RepoPolicy } from './github'
 import type { SyncHost } from './manager'
 import { forgetInFlight } from './pullRequest'
-import { peekPending, syncFolder } from './sync'
+import { peekPending, syncFolder, type PassOptions } from './sync'
 
 /**
  * Test fixtures for the git layer. These run the REAL git, not a mock — every interesting
@@ -147,6 +148,13 @@ export async function snapshot(root: string): Promise<Map<string, Buffer>> {
   await walk(root)
   return out
 }
+
+/** A tracked file saved after the pass's commit (D30): `onDirection('down')` fires right before every rebase. */
+export const lateSave = (repo: GitRepo, rel: string, content: string): Pick<PassOptions, 'onDirection'> => ({
+  onDirection: (d) => {
+    if (d === 'down') writeFileSync(path.join(repo.root, rel), content)
+  },
+})
 
 /**
  * The production host (real passes, real peek) for one computer called `host`, minus the parts a
