@@ -32,6 +32,9 @@ export function commitMessage(host: string, files: readonly string[]): string {
   return rest > 0 ? `sync (${host}): ${head} +${rest} more` : `sync (${host}): ${head}`
 }
 
+/** How many times `git add` is asked before its failure is believed. */
+const STAGE_TRIES = 3
+
 /** The files in `rel` at or over the line. A path that will not stat (deleted) is not. */
 async function oversize(root: string, rel: readonly string[]): Promise<TooBigFile[]> {
   const out: TooBigFile[] = []
@@ -57,7 +60,10 @@ async function stageWithinLimit(bin: string, root: string): Promise<{ failed: Gi
   const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard']))
   const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified']))
   const held = await oversize(root, [...new Set([...untracked, ...modified])])
-  const staged = await git(bin, root, ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)])
+  const add = ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)]
+  let staged = await git(bin, root, add)
+  // A file being written while git reads it fails the whole add ("short read") and stages nothing: ask again.
+  for (let left = STAGE_TRIES - 1; staged.code !== 0 && left > 0; left -= 1) staged = await git(bin, root, add)
   if (staged.code !== 0) return { failed: staged, tooBig: held }
   const late = await oversize(root, zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z'])))
   if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])

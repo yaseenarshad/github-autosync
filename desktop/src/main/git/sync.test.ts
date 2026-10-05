@@ -468,6 +468,52 @@ describe('files too big for GitHub (D11)', { timeout: REAL_GIT_TIMEOUT_MS }, () 
   })
 })
 
+describe('a file written while git is staging it', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
+  /** What git says when a file shrinks between its stat and its read. Nothing is staged. */
+  const SHORT_READ = { code: 128, stdout: '', stderr: 'error: short read while indexing note.md\nerror: note.md: failed to insert into database\nerror: unable to index file \'note.md\'\nfatal: adding files failed\n' }
+
+  /** Runs `body` with the first `failures` calls of `git add` answering SHORT_READ; answers how many adds were made. */
+  async function withFailingAdds(failures: number, body: () => Promise<void>): Promise<number> {
+    const real = vi.mocked(git).getMockImplementation() as typeof git
+    let adds = 0
+    vi.mocked(git).mockImplementation(async (b, root, args, opts) => {
+      if (args[0] !== 'add') return real(b, root, args, opts)
+      adds += 1
+      return adds <= failures ? SHORT_READ : real(b, root, args, opts)
+    })
+    try {
+      await body()
+    } finally {
+      vi.mocked(git).mockImplementation(real)
+    }
+    return adds
+  }
+
+  it('stages again, and the pass ends level with the save sent', async () => {
+    const { repo, remote } = await pushedRepo()
+    await repo.write('note.md', 'saved while git was reading\n')
+
+    const adds = await withFailingAdds(1, async () => {
+      expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+    })
+
+    expect(adds).toBe(2)
+    expect(await repo.run(['log', '-1', '--format=%s'])).toBe('sync (Mac-A): note.md')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+  })
+
+  it('gives up after three tries, in git’s words', async () => {
+    const { repo } = await pushedRepo()
+    await repo.write('note.md', 'never readable\n')
+
+    const adds = await withFailingAdds(Infinity, async () => {
+      expect((await pass(repo)).attention).toEqual({ kind: 'error', detail: 'error: short read while indexing note.md' })
+    })
+
+    expect(adds).toBe(3)
+  })
+})
+
 describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
   /** A tracked file saved after the pass's commit: `onDirection('down')` fires right before the rebase. */
   const lateSave = (repo: GitRepo, rel: string, content: string): Partial<PassOptions> => ({
