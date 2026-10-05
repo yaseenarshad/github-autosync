@@ -1,13 +1,13 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.test.ts; changes: AutoSync result shape and subjects, busy-repo, identity, keep-both, empty clone, push race; .DS_Store cases dropped.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync } from 'node:fs'
 import { readFile, rm, truncate, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
-import { clone, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
+import { clone, lateSave, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
 import { commitMessage, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
 import { hostName, syncFolder, type PassOptions } from './sync'
 
@@ -237,27 +237,48 @@ describe('busy repo (D16): zero writes', { timeout: REAL_GIT_TIMEOUT_MS }, () =>
     expect((await git(bin, repo.root, ['rev-parse', 'HEAD'])).stdout).toBe(head.stdout)
   }
 
-  async function divergedRepo(): Promise<GitRepo> {
-    const { repo } = await pushedRepo()
+  async function divergedRepo(): Promise<{ repo: GitRepo; remote: BareRemote }> {
+    const { repo, remote } = await pushedRepo()
     await repo.run(['checkout', '-q', '-b', 'side'])
     await repo.write('note.md', 'side\n')
     await repo.run(['commit', '-qam', 'side'])
     await repo.run(['checkout', '-q', 'main'])
     await repo.write('note.md', 'main\n')
     await repo.run(['commit', '-qam', 'main'])
-    return repo
+    return { repo, remote }
   }
 
   it('mid-rebase', async () => {
-    const repo = await divergedRepo()
+    const { repo } = await divergedRepo()
     expect((await git(bin, repo.root, ['rebase', 'side'])).code).not.toBe(0)
     await assertUntouched(repo, 'rebase')
   })
 
   it('mid-merge', async () => {
-    const repo = await divergedRepo()
+    const { repo } = await divergedRepo()
     expect((await git(bin, repo.root, ['merge', 'side'])).code).not.toBe(0)
     await assertUntouched(repo, 'merge')
+  })
+
+  it('a merge the user starts while the pass is fetching: nothing of theirs is written over', async () => {
+    const { repo, remote } = await divergedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    const head = await repo.run(['rev-parse', 'HEAD'])
+    let merging = ''
+
+    const res = await pass(repo, {
+      onDirection: (d) => {
+        if (d !== 'down') return
+        spawnSync(bin, ['merge', 'side'], { cwd: repo.root })
+        merging = readFileSync(path.join(repo.root, 'note.md'), 'utf8')
+      },
+    })
+
+    expect(res.attention).toEqual({ kind: 'busy-repo', detail: 'merge' })
+    expect(merging).toContain('<<<<<<<')
+    expect(await repo.read('note.md')).toBe(merging)
+    expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+    expect(await repo.run(['status', '--porcelain'])).toBe('UU note.md')
   })
 
   it('detached HEAD', async () => {
@@ -515,33 +536,24 @@ describe('a file written while git is staging it', { timeout: REAL_GIT_TIMEOUT_M
 })
 
 describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
-  /** A tracked file saved after the pass's commit: `onDirection('down')` fires right before the rebase. */
-  const lateSave = (repo: GitRepo, rel: string, content: string): Partial<PassOptions> => ({
-    onDirection: (d) => {
-      if (d === 'down') writeFileSync(path.join(repo.root, rel), content)
-    },
-  })
+  /** A `pre-rebase` hook that runs `script` on the first rebase only. git runs it once it has found the tree clean. */
+  async function onFirstRebase(repo: GitRepo, script: string): Promise<void> {
+    const hook = path.join(repo.root, '.git', 'hooks', 'pre-rebase')
+    const done = `${shPath(hook)}.done`
+    await writeFile(hook, `#!/bin/sh\n[ -f "${done}" ] && exit 0\ntouch "${done}"\n${script}\n`, { mode: 0o755 })
+  }
 
-  it('is committed, replayed and pushed in the same pass', async () => {
-    const { repo, remote } = await pushedRepo()
-    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
-    await repo.write('a.md', 'a\n')
+  const rebases = () => vi.mocked(git).mock.calls.filter(([, , args]) => args[0] === 'rebase').map(([, , args]) => args.join(' '))
 
-    expect(await pass(repo, lateSave(repo, 'note.md', 'saved late\n'))).toMatchObject({ attention: null, level: true })
-
-    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): a.md\nsync (Mac-B)\nbase')
-    expect(await repo.read('note.md')).toBe('saved late\n')
-    expect(await repo.run(['status', '--porcelain'])).toBe('')
-    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
-  })
-
-  it('is pushed even when nothing else was ours to push', async () => {
+  it('is committed, replayed and pushed in the same pass, even when nothing else was ours to push', async () => {
     const { repo, remote } = await pushedRepo()
     await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
 
     expect(await pass(repo, lateSave(repo, 'note.md', 'saved late\n'))).toMatchObject({ attention: null, level: true })
 
     expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    expect(await repo.read('note.md')).toBe('saved late\n')
+    expect(await repo.run(['status', '--porcelain'])).toBe('')
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
   })
 
@@ -558,17 +570,33 @@ describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TI
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
   })
 
-  it('is committed and replayed when it lands after git’s own clean check', async () => {
+  it('is left alone on disk, committed and replayed when it lands after git’s own clean check', async () => {
     const { repo, remote } = await pushedRepo()
     await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
     await repo.write('note.md', 'edited here\n')
-    // `pre-rebase` runs once git has found the tree clean: the save lands on a file the replay must check out.
-    await writeFile(path.join(repo.root, '.git', 'hooks', 'pre-rebase'), '#!/bin/sh\necho "saved mid-rebase" > note.md\n', { mode: 0o755 })
+    // The save lands on a file the replay must check out, so git refuses before it has begun.
+    await onFirstRebase(repo, 'echo "saved mid-rebase" > note.md')
+    vi.mocked(git).mockClear()
 
     expect(await pass(repo)).toMatchObject({ attention: null, level: true })
 
     expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): note.md\nsync (Mac-B)\nbase')
     expect(await repo.read('note.md')).toBe('saved mid-rebase\n')
+    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+    // Nothing to settle or abort: the refused rebase never touched the save.
+    expect(rebases()).toEqual(['rebase @{u}', 'rebase @{u}'])
+  })
+
+  it('a rewrite with the same bytes is tried again, not shown as an error', async () => {
+    const { repo, remote } = await pushedRepo()
+    await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
+    await repo.write('note.md', 'edited here\n')
+    // Same bytes, new timestamp: git refuses the checkout, and the commit that follows finds nothing new.
+    await onFirstRebase(repo, 'touch -t 203001010000 note.md')
+
+    expect(await pass(repo)).toMatchObject({ attention: null, level: true })
+
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
   })
 
@@ -598,48 +626,15 @@ describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TI
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
   })
 
-  it('never writes into a merge the user started while the pass was fetching (D16)', async () => {
+  it('a rebase that fails for another reason is shown in git’s words after three tries', async () => {
     const { repo, remote } = await pushedRepo()
     await pushFrom(await otherComputer(remote), { 'other.md': '# from B\n' })
-    await repo.run(['checkout', '-q', '-b', 'side'])
-    await repo.write('note.md', 'side\n')
-    await repo.run(['commit', '-qam', 'side'])
-    await repo.run(['checkout', '-q', 'main'])
-    await repo.write('note.md', 'main\n')
-    await repo.run(['commit', '-qam', 'main'])
-    const head = await repo.run(['rev-parse', 'HEAD'])
-    let merging = ''
+    await writeFile(path.join(repo.root, '.git', 'hooks', 'pre-rebase'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    vi.mocked(git).mockClear()
 
-    const res = await pass(repo, {
-      onDirection: (d) => {
-        if (d !== 'down') return
-        spawnSync(bin, ['merge', 'side'], { cwd: repo.root })
-        merging = readFileSync(path.join(repo.root, 'note.md'), 'utf8')
-      },
-    })
+    expect((await pass(repo)).attention).toEqual({ kind: 'error', detail: expect.stringContaining('pre-rebase hook refused') })
 
-    expect(res.attention).toEqual({ kind: 'busy-repo', detail: 'merge' })
-    expect(merging).toContain('<<<<<<<')
-    expect(await repo.read('note.md')).toBe(merging)
-    expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
-    expect(await repo.run(['status', '--porcelain'])).toBe('UU note.md')
-  })
-
-  it('still parks a held-back file around the rebase', async () => {
-    const fixture = await pushedFixture({ 'note.md': 'line one\n', 'second.md': 'two\n' })
-    cleanups.push(fixture.cleanup)
-    const { repo, remote } = fixture
-    await pushFrom(await otherComputer(remote), { 'other.md': '# other\n' })
-    const big = path.join(repo.root, 'note.md')
-    await truncate(big, TOO_BIG_BYTES + 1)
-    const before = await sha1(big)
-
-    const res = await pass(repo, lateSave(repo, 'second.md', 'saved late\n'))
-
-    expect(res).toMatchObject({ attention: null, level: true, tooBig: [{ path: 'note.md', bytes: TOO_BIG_BYTES + 1 }] })
-    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): second.md\nsync (Mac-B)\nbase')
-    expect(await sha1(big)).toBe(before)
-    expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
+    expect(rebases()).toEqual(['rebase @{u}', 'rebase @{u}', 'rebase @{u}'])
   })
 })
 

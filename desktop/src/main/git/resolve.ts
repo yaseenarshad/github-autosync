@@ -105,7 +105,7 @@ async function park(bin: string, root: string, parked: Map<string, Buffer | null
   await git(bin, root, ['checkout', '--', ...dirty.map((p) => `:(literal)${p}`)])
 }
 
-/** The parked saves back on disk (a deleted one deleted again). The next pass commits them. */
+/** The parked saves back on disk (a deleted one deleted again). The next rebase try, or the next pass, commits them. */
 async function unpark(root: string, parked: Map<string, Buffer | null>): Promise<void> {
   for (const [rel, bytes] of parked) {
     const file = abs(root, rel)

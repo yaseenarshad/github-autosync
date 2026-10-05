@@ -12,8 +12,9 @@ import { exchangeViaPr } from './pullRequest'
  * folder that never throws. `manager.ts` owns WHEN a pass runs; this owns what it does.
  *
  * The order is fixed and load-bearing — commit, fetch, rebase, push:
- *   - COMMIT FIRST so the rebase has a clean tree to move. Nothing here ever stashes the user's
- *     work, with one exception (`parkWhileRebasing`): a tracked file held back as too big.
+ *   - COMMIT FIRST so the rebase has a clean tree to move, and again right before each rebase try
+ *     for whatever was saved during the fetch (D30). Nothing here ever stashes the user's work,
+ *     with one exception (`parkWhileRebasing`): a tracked file held back as too big.
  *   - REBASE, never merge: two computers editing different files replay cleanly and the history
  *     stays one line anyone can read on GitHub. Same-file conflicts keep both copies (`resolve.ts`).
  *   - A repo someone is in the middle of (rebase, merge, detached HEAD) is never touched (D16),
