@@ -75,8 +75,13 @@ How the app behaves, in one place. The code is the source of truth; this names w
    - Then the **rules** (D22): the manager's last known `policy`, else `github.repo(origin).policy()` (the repo's rulesets). Not GitHub, gh could not say, or the quit flush (which never asks GitHub) → push mode, not cached.
    - Rules require PRs and the folder is not on the default branch → `busy-repo` `side-branch`, zero writes (D29).
 2. **Commit.** Untracked and modified files of 95 MiB or more are excluded from `add -A` by literal pathspec, so they are never hashed. Anything staged over the line afterwards is unstaged. The rest becomes one commit, `sync (<host>): a.md, b.md, c.md +N more`.
+   - A failed `add` is asked again, three times in all: a file being written while git reads it fails the whole add and stages nothing.
 3. **Fetch** `origin` (10-minute transfer budget). Skipped on the quit flush.
 4. **Rebase** onto `@{u}` when behind, never merge.
+   - The fetch takes seconds, so each try first asks again whether the repo is busy (a merge or rebase started meanwhile → `busy-repo`, nothing more is written, D16), then commits whatever was saved since step 2, then rebases at once. A late save replays with the rest and is never stashed (D30).
+   - Three tries, then one more commit decides. Nothing new to commit: the rebase failed for another reason, `error` in git's words. Something new: the tree is still being written, so the pass ends quietly — no attention, not level, the saves committed — and the next pass replays them (D31).
+   - A rebase git refused to begin is not settled or aborted: the save under it stays on disk as it is.
+   - What is ours to push is counted after the rebase.
    - A held-back tracked file is stashed around the rebase and copied back afterwards. The stash is only restored and dropped if `refs/stash` moved, so the user's own stashes are never touched.
    - Same-file conflicts are resolved with keep-both (`resolve.ts`): GitHub's version stays at the path and this computer's goes beside it as the conflict copy. When one side deleted the file and the other edited it, the edit wins.
    - Saves made while the rebase was stopped are parked and put back.
@@ -97,7 +102,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
    - None yet → finish the send (a pass that died mid-send, S11). Quiet passes wait.
    - OPEN, mergeable or `UNKNOWN` → wait (`pr` set).
    - OPEN, `CONFLICTING` → `closePr` with "Replaced by a newer batch from AutoSync: this one conflicted with main." (deletes its branch), then drop the ref and carry on at 4 (D25). A close that fails keeps the ref and classifies like any gh failure (offline → the quiet retry).
-   - MERGED → if the ref is an ancestor of HEAD, `rebase --onto @{u} <ref>` keep-both (the squash stands in for the batch; later commits replay). Either way drop the ref (S20: never rewrite a history the user moved).
+   - MERGED → if the ref is an ancestor of HEAD, `rebase --onto @{u} <ref>` keep-both, with the tries of step 4 (the squash stands in for the batch; later commits replay). Either way drop the ref (S20: never rewrite a history the user moved).
    - CLOSED → `pr-closed`; the ref stays.
 4. **Receive:** rebase onto `@{u}` when behind, keep-both, as in step 4.
 5. Nothing ahead → level. Commits that net to nothing (`diff --quiet @{u} HEAD`) → `reset --soft @{u}`, level, no PR (S10).
@@ -166,3 +171,6 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D27** — A folder the Docs or Draw app syncs gets `other-app` and zero writes, in both modes. Add folder still only warns.
 - **D28** — GitHub calls go through the user's own `gh` (explicit paths, `-R owner/repo`, run from the filesystem root, prompts off). Missing or logged out → `no-gh`.
 - **D29** — A side branch of a PR-rule repo is never touched once the rules are known (`busy-repo` `side-branch`).
+- **D30** — A save that lands under a rebase is committed and replayed, never stashed: it goes through keep-both like any other edit.
+- **D31** — A tree that will not hold still for three tries is `pending`, not an `error`. The debounce tries again (30 s; 5 min in PR mode), and the one-hour notice (D7) covers a writer that never stops.
+- **D32** — A file some program rewrites on every pass is synced like any other. `.gitignore` stays the only filter (D9).
