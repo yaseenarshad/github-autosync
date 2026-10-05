@@ -2,6 +2,7 @@
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { TooBigFile } from '@shared/types'
+import { repoState } from './detect'
 import { classifyGitFailure, firstMeaningfulLine, git, zList, type GitResult } from './exec'
 import type { GhFailure } from './github'
 import { resolveRebase } from './resolve'
@@ -92,14 +93,40 @@ export function fromGhFailure(failure: GhFailure, tooBig: TooBigFile[], fetched:
   return { ...CLEAN, attention: { kind: failure.kind, detail: failure.detail }, fetched, tooBig }
 }
 
-/** `git rebase <args>`, same-file conflicts kept both (D6), held-back files parked around it. Null when it landed, else the failure. */
-export function rebaseKeepingBoth(bin: string, root: string, host: string, tooBig: readonly TooBigFile[], args: string[]): Promise<GitResult | null> {
-  return parkWhileRebasing(bin, root, tooBig, async () => {
-    const rebased = await git(bin, root, ['rebase', ...args])
-    if (rebased.code === 0 || (await resolveRebase(bin, root, host))) return null
-    return rebased
-  })
+/** How many times a rebase is tried while saves keep landing under it (D30). */
+const REBASE_TRIES = 3
+
+/**
+ * `git rebase <args>`, same-file conflicts kept both (D6), held-back files parked around it. Null
+ * when it landed, else the verdict.
+ *
+ * git will not rebase over a tracked file saved after the pass's commit, and the fetch in between
+ * takes seconds. So every try commits what is there and rebases at once (D30): a late save replays
+ * with the rest, keep-both included, and is never stashed. A try that failed with nothing new to
+ * commit failed for another reason — git's own words. A tree still being written after the last
+ * try is not a problem to show anyone (D31): its saves are committed and the next pass replays them.
+ */
+export async function rebaseKeepingBoth(bin: string, root: string, host: string, args: string[]): Promise<Verdict | null> {
+  let failed: GitResult | null = null
+  for (let left = REBASE_TRIES; ; left -= 1) {
+    // D16, asked again: the user may have started a merge or a rebase since the pass began.
+    const { busy } = await repoState(bin, root)
+    if (busy !== null) return { ...CLEAN, attention: { kind: 'busy-repo', detail: busy }, fetched: true }
+    const late = await commitPending(bin, root, host)
+    if (late.failed !== null) return fromFailure(late.failed, late.tooBig, true)
+    if (failed !== null && !late.committed) return fromFailure(failed, late.tooBig, true)
+    if (left === 0) return { ...CLEAN, fetched: true, tooBig: late.tooBig }
+    failed = await parkWhileRebasing(bin, root, late.tooBig, async () => {
+      const rebased = await git(bin, root, ['rebase', ...args])
+      if (rebased.code === 0 || (await resolveRebase(bin, root, host))) return null
+      return rebased
+    })
+    if (failed === null) return null
+  }
 }
+
+/** Our commits GitHub does not have yet. Asked after a rebase, which may have committed a late save (D30). */
+export const countAhead = async (bin: string, root: string): Promise<number> => Number.parseInt((await git(bin, root, ['rev-list', '--count', '@{u}..HEAD'])).stdout, 10) || 0
 
 /**
  * The one stash. A held-back TRACKED file is still modified after the commit, and `git rebase`

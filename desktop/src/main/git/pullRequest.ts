@@ -1,7 +1,7 @@
 import type { PullRequestRef, TooBigFile } from '@shared/types'
 import { findGit, git, zList } from './exec'
 import type { GitHubRepo, PullRequest, RepoPolicy } from './github'
-import { CLEAN, commitMessage, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { CLEAN, commitMessage, countAhead, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import type { PassOptions } from './sync'
 
 /**
@@ -77,8 +77,8 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
       // S20: a batch no longer under HEAD (the user reset past it) replays nothing and is only forgotten — history is theirs.
       if ((await git(bin, root, ['merge-base', '--is-ancestor', batch, 'HEAD'])).code === 0) {
         opts.onDirection?.('down')
-        const landed = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['--onto', '@{u}', batch])
-        if (landed !== null) return fromFailure(landed, tooBig, true)
+        const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['--onto', '@{u}', batch])
+        if (stopped !== null) return stopped
       }
     }
     await git(bin, root, ['update-ref', '-d', IN_FLIGHT])
@@ -87,13 +87,13 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
   // Nothing in flight: receive, then send what is ours.
   const counts = await git(bin, root, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])
   if (counts.code !== 0) return fromFailure(counts, tooBig, true)
-  const [behind = 0, ahead = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
+  const [behind = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
   if (behind > 0) {
     opts.onDirection?.('down')
-    const rebased = await rebaseKeepingBoth(bin, root, opts.host, tooBig, ['@{u}'])
-    if (rebased !== null) return fromFailure(rebased, tooBig, true)
+    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
+    if (stopped !== null) return stopped
   }
-  if (ahead === 0) return { ...waiting(null), level: true }
+  if ((await countAhead(bin, root)) === 0) return { ...waiting(null), level: true }
   // S10: commits that net to nothing (an edit undone) make no PR — folded away, the tree untouched.
   if ((await git(bin, root, ['diff', '--quiet', '@{u}', 'HEAD'])).code === 0) {
     const folded = await git(bin, root, ['reset', '-q', '--soft', '@{u}'])

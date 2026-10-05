@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -128,6 +129,44 @@ describe('PR publishing', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(await remoteHead(repo, remote)).toBe(await head(repo))
     expect(await repo.read('a.md')).toBe('a\n')
     expect(await repo.read('b.md')).toBe('b\n')
+  })
+
+  /** D30: a tracked file saved after the pass's commit; `onDirection('down')` fires right before the rebase. */
+  const lateSave = (repo: GitRepo, rel: string, content: string): Partial<PassOptions> => ({
+    onDirection: (d) => {
+      if (d === 'down') writeFileSync(path.join(repo.root, rel), content)
+    },
+  })
+
+  it('D30: a save that lands while a merged batch is landing is replayed with the rest and goes out in the next PR', async () => {
+    const { repo, gh } = await setup()
+    await repo.write('a.md', 'a\n')
+    await pass(repo, gh)
+    await repo.write('b.md', 'b\n')
+    await pass(repo, gh)
+    expect(await gh.merge(1)).toBe(true)
+
+    const res = await pass(repo, gh, lateSave(repo, 'note.md', 'saved late\n'))
+
+    expect(res).toMatchObject({ attention: null, pr: { number: 2 } })
+    expect(await repo.run(['log', '--format=%s', '-4'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): b.md\nsync (Mac-A): a.md (#1)\nbase')
+    expect(await inFlight(repo)).toBe(await head(repo))
+    expect(gh.prs()[1]).toMatchObject({ title: 'sync (Mac-A): b.md, note.md', state: 'OPEN' })
+    expect(await repo.run(['status', '--porcelain'])).toBe('')
+  })
+
+  it('D30: a save that lands while a teammate’s merge is received still goes out as a PR', async () => {
+    const { repo: a, remote, gh } = await setup()
+    const b = await teammate(remote)
+    await b.write('b.md', 'b\n')
+    await syncFolder(b.root, { host: 'Mac-B', github: gh })
+    expect(await gh.merge(1)).toBe(true)
+
+    const res = await pass(a, gh, lateSave(a, 'note.md', 'saved late\n'))
+
+    expect(res).toMatchObject({ attention: null, level: false, pr: { number: 2 } })
+    expect(await a.read('b.md')).toBe('b\n')
+    expect(gh.prs()[1]).toMatchObject({ title: 'sync (Mac-A): note.md', state: 'OPEN' })
   })
 
   it('S22/S27: two teammates on different files both publish and both receive', async () => {
