@@ -1,4 +1,5 @@
 // Moved out of sync.ts (itself copied from yaseen-draw-app@89b29c9) so pullRequest.ts shares it without an import cycle; new: `fromGhFailure`, `rebaseKeepingBoth`.
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { TooBigFile } from '@shared/types'
 import { classifyGitFailure, firstMeaningfulLine, git, zList, type GitResult } from './exec'
@@ -15,6 +16,9 @@ import type { PassResult } from './sync'
 /** A stalled transfer, not a slow one: a big folder over a home uplink can take minutes and must not restart from zero every 30 s. */
 export const TRANSFER_TIMEOUT_MS = 10 * 60_000
 
+/** GitHub refuses a push with any blob over 100 MiB; 95 leaves headroom for a file that is still growing (D11). */
+export const TOO_BIG_BYTES = 95 * 1024 * 1024
+
 /** How many file names a commit subject lists before it summarises the rest. */
 const SUBJECT_FILES = 3
 
@@ -25,6 +29,49 @@ export function commitMessage(host: string, files: readonly string[]): string {
   const rest = names.length - SUBJECT_FILES
   const head = names.slice(0, SUBJECT_FILES).join(', ')
   return rest > 0 ? `sync (${host}): ${head} +${rest} more` : `sync (${host}): ${head}`
+}
+
+/** The files in `rel` at or over the line. A path that will not stat (deleted) is not. */
+async function oversize(root: string, rel: readonly string[]): Promise<TooBigFile[]> {
+  const out: TooBigFile[] = []
+  for (const p of rel) {
+    const st = await stat(path.join(root, p)).catch(() => null)
+    if (st !== null && st.isFile() && st.size >= TOO_BIG_BYTES) out.push({ path: p, bytes: st.size })
+  }
+  return out
+}
+
+/**
+ * D11 — a file over the line must never reach a commit: GitHub refuses the WHOLE push for one
+ * oversize blob, so it would silently jam every other change behind it, forever. Held back (listed
+ * in the status), everything else goes. Idempotent — a held-back file is still dirty, so every pass
+ * sees it again:
+ *  - BEFORE `add -A` the untracked and modified files are stat'ed and the oversize ones excluded by
+ *    literal pathspec — excluded, not added-then-reset, so no 100 MB blob is ever hashed into
+ *    `.git/objects`;
+ *  - AFTER, anything staged over the line is unstaged — the belt for a file that grew in between.
+ * OUT OF SCOPE: a file already COMMITTED over the limit; the push keeps failing (`error`).
+ */
+async function stageWithinLimit(bin: string, root: string): Promise<{ failed: GitResult | null; tooBig: TooBigFile[] }> {
+  const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard']))
+  const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified']))
+  const held = await oversize(root, [...new Set([...untracked, ...modified])])
+  const staged = await git(bin, root, ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)])
+  if (staged.code !== 0) return { failed: staged, tooBig: held }
+  const late = await oversize(root, zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z'])))
+  if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])
+  const all = new Map([...held, ...late].map((f) => [f.path, f]))
+  return { failed: null, tooBig: [...all.values()].sort((a, b) => a.path.localeCompare(b.path)) }
+}
+
+/** Local edits become one commit, minus anything GitHub would refuse (D11). `committed`: there was something to commit, and it is. */
+export async function commitPending(bin: string, root: string, host: string): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; committed: boolean }> {
+  const { failed, tooBig } = await stageWithinLimit(bin, root)
+  if (failed !== null) return { failed, tooBig, committed: false }
+  const staged = zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z']))
+  if (staged.length === 0) return { failed: null, tooBig, committed: false }
+  const committed = await git(bin, root, ['commit', '-m', commitMessage(host, staged)])
+  return { failed: committed.code === 0 ? null : committed, tooBig, committed: committed.code === 0 }
 }
 
 export type Verdict = Pick<PassResult, 'attention' | 'offline' | 'fetched' | 'level' | 'tooBig' | 'policy' | 'pr'>

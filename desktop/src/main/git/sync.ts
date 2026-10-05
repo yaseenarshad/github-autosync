@@ -1,12 +1,10 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts, other-app refusal and the PR route (D22–D29; shared helpers moved to pass.ts).
-import { stat } from 'node:fs/promises'
 import os from 'node:os'
-import path from 'node:path'
 import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, TooBigFile } from '@shared/types'
-import { findGit, git, zList, type GitResult } from './exec'
+import { findGit, git } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { ghCli, type GitHub, type RepoPolicy } from './github'
-import { CLEAN, commitMessage, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { CLEAN, commitPending, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import { exchangeViaPr } from './pullRequest'
 
 /**
@@ -26,9 +24,6 @@ import { exchangeViaPr } from './pullRequest'
  * Every failure is CLASSIFIED rather than thrown: offline is not the user's problem (retry
  * quietly), auth and identity are (say so once), anything else is shown verbatim.
  */
-
-/** GitHub refuses a push with any blob over 100 MiB; 95 leaves headroom for a file that is still growing (D11). */
-export const TOO_BIG_BYTES = 95 * 1024 * 1024
 
 /** Quitting never waits on a half-dead network for longer than this. */
 const FLUSH_PUSH_TIMEOUT_MS = 5_000
@@ -126,14 +121,8 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
   if (policy?.requiresPr === true && repo.branch !== policy.defaultBranch) return { ...CLEAN, attention: SIDE_BRANCH, policy }
 
   // ---------- 1. local edits become one commit (minus anything GitHub would refuse — D11) ----------
-  const staging = await stageWithinLimit(bin, root)
-  const tooBig = staging.tooBig
-  if (staging.failed !== null) return fromFailure(staging.failed, tooBig)
-  const staged = zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z']))
-  if (staged.length > 0) {
-    const committed = await git(bin, root, ['commit', '-m', commitMessage(opts.host, staged)])
-    if (committed.code !== 0) return fromFailure(committed, tooBig)
-  }
+  const { failed, tooBig } = await commitPending(bin, root, opts.host)
+  if (failed !== null) return fromFailure(failed, tooBig)
 
   if (gh !== null && policy?.requiresPr === true) return { ...(await exchangeViaPr(bin, root, gh, policy, tooBig, opts)), policy }
   const { needsPr, ...pushed } = await exchange(bin, root, tooBig, opts, true)
@@ -200,39 +189,6 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
     if (pushed.code !== 0) return fromFailure(pushed, tooBig, !flush)
   }
   return { ...CLEAN, fetched: !flush, level: !flush, tooBig }
-}
-
-/** The files in `rel` at or over the line. A path that will not stat (deleted) is not. */
-async function oversize(root: string, rel: readonly string[]): Promise<TooBigFile[]> {
-  const out: TooBigFile[] = []
-  for (const p of rel) {
-    const st = await stat(path.join(root, p)).catch(() => null)
-    if (st !== null && st.isFile() && st.size >= TOO_BIG_BYTES) out.push({ path: p, bytes: st.size })
-  }
-  return out
-}
-
-/**
- * D11 — a file over the line must never reach a commit: GitHub refuses the WHOLE push for one
- * oversize blob, so it would silently jam every other change behind it, forever. Held back (listed
- * in the status), everything else goes. Idempotent — a held-back file is still dirty, so every pass
- * sees it again:
- *  - BEFORE `add -A` the untracked and modified files are stat'ed and the oversize ones excluded by
- *    literal pathspec — excluded, not added-then-reset, so no 100 MB blob is ever hashed into
- *    `.git/objects`;
- *  - AFTER, anything staged over the line is unstaged — the belt for a file that grew in between.
- * OUT OF SCOPE: a file already COMMITTED over the limit; the push keeps failing (`error`).
- */
-async function stageWithinLimit(bin: string, root: string): Promise<{ failed: GitResult | null; tooBig: TooBigFile[] }> {
-  const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard']))
-  const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified']))
-  const held = await oversize(root, [...new Set([...untracked, ...modified])])
-  const staged = await git(bin, root, ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)])
-  if (staged.code !== 0) return { failed: staged, tooBig: held }
-  const late = await oversize(root, zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z'])))
-  if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])
-  const all = new Map([...held, ...late].map((f) => [f.path, f]))
-  return { failed: null, tooBig: [...all.values()].sort((a, b) => a.path.localeCompare(b.path)) }
 }
 
 /** The pending list alone, for the manager's look between passes; null when git cannot read the folder. */
