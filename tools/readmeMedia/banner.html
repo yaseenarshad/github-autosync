@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  The README banner, 1600 × 340: the icon, the name, the one line and a small accent line, on its
+  own dark card (rounded, transparent outside) so it reads on GitHub's light and dark pages alike.
+  On the right, quietly: a menu bar with the app's REAL green dot in it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitHub AutoSync banner</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  body { width: 1600px; height: 340px; }
+  .card { position: absolute; inset: 0; border-radius: 34px; overflow: hidden; display: flex; align-items: center; background: radial-gradient(700px 420px at 1360px 170px, rgba(46, 160, 67, .22), transparent 70%), linear-gradient(135deg, #12201a, #0d1117 60%); }
+  .card > img { width: 158px; height: 158px; margin-left: 118px; flex: none; }
+  .text { margin-left: 46px; }
+  h1 { margin: 0; font-family: var(--display); font-size: 84px; line-height: 1; font-weight: 800; letter-spacing: -2.2px; color: #fff; }
+  .line { margin: 18px 0 0; font-size: 40px; font-weight: 700; letter-spacing: -.6px; color: #e3e8ee; }
+  .more { margin: 12px 0 0; font-size: 26px; font-weight: 600; letter-spacing: -.2px; color: #6fdc8c; }
+  .bar { position: absolute; right: 64px; top: 50px; width: 400px; height: 54px; border-radius: 14px; overflow: hidden; }
+  .bar .menubar { height: 54px; background: rgba(255, 255, 255, .1); color: rgba(255, 255, 255, .5); }
+  .bar .glyph { filter: invert(1); opacity: .5; }
+  .halo { position: absolute; border-radius: 50%; box-shadow: 0 0 0 6px rgba(46, 160, 67, .35), 0 0 34px rgba(46, 160, 67, .7); }
+</style>
+</head>
+<body>
+<div class="card">
+  <img alt="" src="../../desktop/build/icon.png">
+  <div class="text">
+    <h1>GitHub AutoSync</h1>
+    <p class="line">GitHub for knowledge work.</p>
+    <p class="more">Your files sync themselves. Every change kept in git.</p>
+  </div>
+  <div class="bar" id="bar"></div>
+</div>
+<script src="stage.js"></script>
+<script>
+  const bar = menubar({ app: '', menus: [], dot: 'synced', u: 2, clock: '9:41' })
+  document.getElementById('bar').append(bar)
+  bar.querySelector('.clock').style.color = 'rgba(255,255,255,.55)'
+  const d = bar.querySelector('[data-dot]').getBoundingClientRect()
+  add(document.querySelector('.card'), '', 'halo', { left: d.left, top: d.top, width: d.width, height: d.height })
+</script>
+</body>
+</html>

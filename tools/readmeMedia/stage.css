@@ -1,0 +1,78 @@
+/*
+ * The one made-up stage every README picture of GitHub AutoSync stands on: a calm wallpaper, a
+ * small menu bar (with the app's REAL menu bar dot, desktop/resources/tray/*@2x.png), window
+ * frames, a plain text editor, and the marks a picture may add — the pointer, keycaps, a box, a
+ * label. Nothing of the app's own window is drawn here: that is always a capture of the real
+ * client. Sizes are CSS px of the picture; every page is drawn at 2× and scaled down.
+ */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --ink: #1b1f2a;
+  --green: #2ea043;
+  --amber: #d29922;
+  --blue: #2f81f7;
+  --red: #da3633;
+  --mark: #f03e3e;
+}
+html, body { margin: 0; background: transparent; }
+body { position: relative; overflow: hidden; font-family: var(--font); color: var(--ink); -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+
+/* ---------- wallpaper ---------- */
+.wallpaper { position: absolute; inset: 0; overflow: hidden; isolation: isolate; background: linear-gradient(165deg, #b3c5f3 0%, #93aae8 48%, #7590dc 100%); }
+.wallpaper::before, .wallpaper::after, .wallpaper > .wave { content: ''; position: absolute; border-radius: 50%; z-index: -1; }
+.wallpaper::before { width: 150%; height: 130%; left: -75%; top: 48%; background: rgba(255, 255, 255, .13); }
+.wallpaper::after { width: 130%; height: 150%; left: 46%; top: -108%; background: rgba(255, 255, 255, .11); }
+.wallpaper > .wave { width: 120%; height: 110%; left: 38%; top: 68%; background: rgba(60, 80, 180, .12); }
+.rounded { border-radius: 22px; }
+
+/* ---------- menu bar ---------- */
+/* --u is the menu bar's zoom: 1 = life size (24 px tall). */
+.menubar { --u: 1; position: absolute; left: 0; right: 0; top: 0; height: calc(26px * var(--u)); display: flex; align-items: center; gap: calc(19px * var(--u)); padding: 0 calc(16px * var(--u)); background: rgba(255, 255, 255, .62); font-size: calc(13px * var(--u)); color: #1c1d22; white-space: nowrap; }
+.menubar b { font-weight: 700; }
+.menubar .right { margin-left: auto; display: flex; align-items: center; gap: calc(16px * var(--u)); }
+.menubar .glyph { width: calc(17px * var(--u)); height: calc(17px * var(--u)); display: block; }
+.menubar .clock { font-weight: 500; }
+/* The app's dot: the real tray PNG, 18 pt (its @2x is 36 px) across at life size. */
+.tray { position: relative; width: calc(18px * var(--u)); height: calc(18px * var(--u)); flex: none; }
+.tray img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tray img + img { opacity: 0; }
+
+/* ---------- windows ---------- */
+.frame { position: absolute; border-radius: 11px; overflow: hidden; box-shadow: 0 0 0 1px rgba(30, 40, 90, .22), 0 16px 44px rgba(30, 40, 100, .34); background: #fff; }
+.frame > img.app { display: block; width: 100%; height: 100%; }
+/* macOS's three buttons, drawn where a hiddenInset title bar has them (over the app's own strip). */
+.lights { position: absolute; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .2); }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+/* A plain text editor: a title bar and one file. */
+.editor { position: absolute; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px rgba(30, 40, 90, .2), 0 14px 40px rgba(30, 40, 100, .3); }
+.editor .bar { height: 40px; background: #eceef2; border-bottom: 1px solid #d8dbe1; display: flex; align-items: center; position: relative; }
+.editor .bar .lights { left: 14px; top: 14px; }
+.editor .bar .title { flex: 1; text-align: center; font-size: 15px; font-weight: 600; color: #4a4f5c; }
+.editor .text { padding: 20px 26px; font-family: var(--mono); font-size: 19px; line-height: 1.7; color: #22262f; white-space: pre; }
+.editor .text .h { font-weight: 700; font-size: 22px; color: #111; }
+.editor .text .done { color: #7c8290; }
+.editor .text .line { border-radius: 6px; margin: 0 -8px; padding: 0 8px; }
+.editor .text .new { background: rgba(46, 160, 67, .2); box-shadow: inset 3px 0 0 var(--green); }
+.caret { display: inline-block; width: 2px; height: 1.15em; margin-left: 1px; vertical-align: -.2em; background: #1f6feb; }
+
+/* ---------- marks ---------- */
+.pointer { position: absolute; width: 40px; height: 40px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .35)); z-index: 20; }
+.pointer::before { content: ''; position: absolute; left: -21px; top: -23px; width: 54px; height: 54px; border-radius: 50%; background: rgba(255, 212, 59, .5); border: 2px solid rgba(240, 180, 0, .8); }
+.pointer svg { position: relative; display: block; }
+.ring { position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; border: 3px solid #4263eb; background: rgba(66, 99, 235, .18); z-index: 19; }
+.keys { position: absolute; display: flex; gap: 12px; align-items: center; padding: 14px 18px; border-radius: 18px; background: rgba(28, 30, 36, .9); box-shadow: 0 10px 30px rgba(0, 0, 0, .28); z-index: 21; }
+.key { min-width: 54px; height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: linear-gradient(#fdfdfd, #e9ecef); border-bottom: 4px solid #adb5bd; color: #1e1e1e; font-size: 27px; font-weight: 600; line-height: 1; }
+.keys .word { color: #fff; font-size: 23px; font-weight: 600; padding: 0 4px 0 6px; }
+.box { position: absolute; border: 4px solid var(--mark); border-radius: 12px; box-shadow: 0 0 0 5px rgba(240, 62, 62, .2); z-index: 18; }
+.note { position: absolute; padding: 8px 16px; border-radius: 12px; background: var(--mark); color: #fff; font-size: 23px; font-weight: 700; letter-spacing: -.2px; white-space: nowrap; box-shadow: 0 8px 24px rgba(160, 20, 20, .3); z-index: 18; }
+/* The state's word under a dot in the menu bar. */
+.say { position: absolute; padding: 9px 16px 9px 14px; border-radius: 13px; background: #fff; font-size: 21px; font-weight: 700; letter-spacing: -.2px; white-space: nowrap; box-shadow: 0 8px 22px rgba(20, 30, 80, .22); display: flex; align-items: center; gap: 9px; transform: translateX(-50%); }
+.say::before { content: ''; position: absolute; left: 50%; top: -8px; margin-left: -9px; border: 9px solid transparent; border-top: 0; border-bottom-color: #fff; }
+.say i { width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+.say.synced { color: #1a7f37; } .say.pending { color: #9a6700; } .say.syncing { color: #0969da; } .say.attention { color: #cf222e; }

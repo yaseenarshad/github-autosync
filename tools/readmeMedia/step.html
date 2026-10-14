@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  The three "how it works" pictures, 1000 × 625: the stage seen closer, the menu bar dot telling
+  the story — a grey ring while the first folder is added, amber while an edit waits, green once
+  it is on GitHub. The window parts are captures of the REAL client, cropped by capture.mjs.
+
+  ?p= JSON: step = 1 | 2 | 3 · shot = the crop's URL (steps 1 and 3) · crop = { w, h }, its CSS
+  size · target = { x, y } where the pointer points, in the crop's CSS px (step 1).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How it works</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  body { width: 1000px; height: 625px; }
+  .piece { position: absolute; border-radius: 14px; overflow: hidden; box-shadow: 0 0 0 1px rgba(30, 40, 90, .2), 0 18px 48px rgba(30, 40, 100, .34); background: #fff; }
+  .piece img { display: block; width: 100%; height: 100%; }
+  .editor .text { font-size: 24px; padding: 24px 32px; }
+  .editor .text .h { font-size: 27px; }
+</style>
+</head>
+<body>
+<div class="wallpaper rounded" id="paper"><i class="wave"></i></div>
+<script src="stage.js"></script>
+<script>
+  const { step, shot, crop, target } = PARAMS
+  const paper = document.getElementById('paper')
+  const DOT = { 1: 'plain', 2: 'pending', 3: 'synced' }[step]
+  const bar = menubar({ app: step === 2 ? 'Editor' : 'GitHub AutoSync', menus: ['File', 'Edit', 'View'], dot: DOT, u: 1.7, clock: 'Tue 13 Oct  9:41' })
+  paper.append(bar)
+
+  /** The word under the dot, as in the hero. */
+  function say(state) {
+    const d = bar.querySelector('[data-dot]').getBoundingClientRect()
+    add(paper, `<i></i>${WORD[state]}`, `say ${state}`, { left: d.left + d.width / 2, top: d.bottom + 12 })
+  }
+
+  /** A crop of the real window, `width` px wide, centred, its top at `top`. */
+  function piece(width, top) {
+    const s = width / crop.w
+    const left = (1000 - width) / 2
+    add(paper, `<img alt="" src="${shot}">`, 'piece', { left, top, width, height: crop.h * s })
+    return { s, left, top }
+  }
+
+  if (step === 1) {
+    const at = piece(860, 0)
+    // Vertically centred under the menu bar.
+    const el = paper.querySelector('.piece')
+    const top = 44 + (625 - 44 - crop.h * at.s) / 2
+    el.style.top = `${top}px`
+    paper.append(pointer(at.left + target.x * at.s, top + target.y * at.s))
+  }
+
+  if (step === 2) {
+    say('pending')
+    const lines = [
+      ['h', '# Spring launch'],
+      ['done', '- [x] Final pricing page'],
+      ['done', '- [x] Record the demo video'],
+      ['', '- [ ] Press kit to partners'],
+      ['new', '- [ ] Email the waitlist on Monday<span class="caret"></span>'],
+    ]
+    const editor = add(paper, '<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">launch-plan.md</div></div><div class="text"></div>', 'editor', { left: 70, top: 158, width: 660, height: 360 })
+    editor.querySelector('.text').innerHTML = lines.map(([cls, line]) => `<div class="line ${cls}">${line}</div>`).join('')
+    paper.append(place(keys(['⌘', 'S'], 'Save'), { left: 640, top: 486 }))
+  }
+
+  if (step === 3) {
+    say('synced')
+    const width = 520
+    piece(width, 150)
+  }
+</script>
+</body>
+</html>

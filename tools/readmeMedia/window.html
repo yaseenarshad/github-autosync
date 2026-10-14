@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  The real app window on the stage: wallpaper, menu bar (with the app's real dot), and the window
+  frame around a capture of the REAL client, which capture.mjs takes and passes in. The page only
+  draws what macOS would draw around the window (the frame, its three buttons over the app's own
+  title strip) plus at most one mark: a box with a label, or the pointer.
+
+  ?p= JSON: width, height = the picture · shot = the capture's URL · app = { w, h }, the window's
+  CSS size · win = { x, y, w }, where the window goes and how wide (the scale follows) · dot = the
+  menu bar dot's state · u = the menu bar's zoom · box = { x, y, width, height } in the window's
+  CSS px · note = { text, x, y } in the window's CSS px · pointer = { x, y } in the window's CSS px.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>App window on the stage</title>
+<link rel="stylesheet" href="stage.css">
+</head>
+<body>
+<div class="wallpaper rounded" id="paper"><i class="wave"></i></div>
+<script src="stage.js"></script>
+<script>
+  const { width, height, shot, app, win, dot = 'synced', u = 1.5, box, note, pointer: tip, round = true } = PARAMS
+  Object.assign(document.body.style, { width: `${width}px`, height: `${height}px` })
+  const paper = document.getElementById('paper')
+  if (!round) paper.classList.remove('rounded')
+  paper.append(menubar({ dot, u }))
+  const s = win.w / app.w
+  const at = (x, y) => [win.x + x * s, win.y + y * s]
+  const frame = add(paper, `<img class="app" alt="" src="${shot}">`, 'frame', { left: win.x, top: win.y, width: win.w, height: app.h * s, borderRadius: `${10 * s}px` })
+  // The three buttons, centred in the app's 28 px title strip.
+  const lights = add(frame, '<i></i><i></i><i></i>', 'lights', { left: 12 * s, top: 8 * s })
+  lights.style.gap = `${8 * s}px`
+  for (const i of lights.children) Object.assign(i.style, { width: `${12 * s}px`, height: `${12 * s}px` })
+  if (box) {
+    const pad = 8
+    const [x, y] = at(box.x, box.y)
+    add(paper, '', 'box', { left: x - pad, top: y - pad, width: box.width * s + pad * 2, height: box.height * s + pad * 2 })
+  }
+  if (note) {
+    const [x, y] = at(note.x, note.y)
+    add(paper, note.text, 'note', { left: x, top: y })
+  }
+  if (tip) paper.append(pointer(...at(tip.x, tip.y)))
+</script>
+</body>
+</html>
