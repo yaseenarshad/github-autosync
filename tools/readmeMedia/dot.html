@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  The menu bar dot, 1600 × 600: the app's four colours side by side, each a piece of a menu bar
+  with the app's REAL tray PNG in it (desktop/resources/tray), its word from the app's own menu,
+  and what it means. Green and red are the big idea, so they are the big cards.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The menu bar dot</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  body { width: 1600px; height: 600px; }
+  h1 { position: absolute; left: 72px; top: 52px; margin: 0; font-family: var(--display); font-size: 70px; font-weight: 800; letter-spacing: -1.8px; color: #141a33; }
+  h1 .g { color: #1a7f37; } h1 .r { color: #cf222e; }
+  .lede { position: absolute; left: 74px; top: 148px; margin: 0; font-size: 30px; font-weight: 500; color: #2a3358; }
+  .cards { position: absolute; left: 64px; right: 64px; top: 236px; display: flex; gap: 24px; align-items: stretch; }
+  .card { position: relative; flex: none; width: 270px; height: 300px; border-radius: 26px; background: rgba(255, 255, 255, .58); box-shadow: 0 10px 30px rgba(30, 40, 100, .18); overflow: hidden; }
+  .card.big { width: 442px; background: rgba(255, 255, 255, .8); box-shadow: 0 0 0 4px var(--c), 0 0 46px color-mix(in srgb, var(--c) 55%, transparent), 0 14px 36px rgba(30, 40, 100, .22); }
+  .card .menubar .right { margin: 0 auto; }
+  .card .menubar { position: relative; border-bottom: 1px solid rgba(30, 40, 90, .08); background: rgba(255, 255, 255, .9); }
+  .card .word { margin: 34px 30px 0; font-family: var(--display); font-size: 40px; font-weight: 800; letter-spacing: -.8px; color: var(--c); }
+  .card.big .word { font-size: 60px; letter-spacing: -1.4px; margin-top: 30px; }
+  .card .what { margin: 10px 30px 0; font-size: 23px; line-height: 1.32; font-weight: 500; color: #2c3240; }
+  .card.big .what { font-size: 28px; }
+  .synced { --c: #1a7f37; } .syncing { --c: #0969da; } .pending { --c: #9a6700; } .attention { --c: #cf222e; }
+</style>
+</head>
+<body>
+<div class="wallpaper rounded"><i class="wave"></i></div>
+<h1><span class="g">Green:</span> done. <span class="r">Red:</span> look.</h1>
+<p class="lede">One dot in your menu bar says how every folder is doing.</p>
+<div class="cards" id="cards"></div>
+<script src="stage.js"></script>
+<script>
+  // [state, big?, what it means]
+  const CARDS = [
+    ['synced', true, 'Every change is on GitHub, on every computer.'],
+    ['syncing', false, 'Sending or getting changes.'],
+    ['pending', false, 'Sends 30 s after you stop editing.'],
+    ['attention', true, 'Open the window: one click copies the fix for your AI agent.'],
+  ]
+  const cards = document.getElementById('cards')
+  for (const [state, big, what] of CARDS) {
+    const card = document.createElement('div')
+    card.className = `card ${state} ${big ? 'big' : ''}`
+    card.append(menubar({ app: '', menus: [], dot: state, u: big ? 3.4 : 2.6, clock: '9:41', glyphs: false }))
+    card.insertAdjacentHTML('beforeend', `<div class="word">${WORD[state].replace('…', '')}</div><div class="what">${what}</div>`)
+    cards.append(card)
+  }
+</script>
+</body>
+</html>
