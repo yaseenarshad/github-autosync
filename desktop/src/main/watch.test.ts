@@ -1,7 +1,8 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { tempDir } from './git/gitFixture'
+import { PEEK_MS } from '@shared/status'
+import { makeGitRepo, tempDir } from './git/gitFixture'
 import { watchFolder } from './watch'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -43,4 +44,50 @@ it('fires for a change anywhere in the folder but not inside .git or node_module
   await writeFile(path.join(root, 'notes', 'b.md'), 'x')
   await new Promise((r) => setTimeout(r, 400))
   expect(events).toBe(seen)
+})
+
+it('skips what git ignores, picks up a new ignored folder, and follows a .gitignore edit', { timeout: 15_000 }, async () => {
+  const repo = await makeGitRepo()
+  cleanups.push(repo.cleanup)
+  await repo.write('.gitignore', '.venv/\n*.db-wal\nbuild/\n')
+  await repo.write('.venv/lib/site.py', 'x')
+  await repo.write('data/lab.db-wal', 'x')
+  await repo.write('notes/a.md', 'x')
+  let events = 0
+  const close = watchFolder(repo.root, () => {
+    events += 1
+  })
+  cleanups.push(close)
+  await new Promise((r) => setTimeout(r, 300)) // git's list, then the initial scan
+
+  await repo.write('.venv/lib/site.py', 'y')
+  await repo.write('data/lab.db-wal', 'y')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(0)
+
+  await repo.write('notes/a.md', 'y')
+  await until(() => events > 0)
+
+  // Made after the start: it may wake the folder once, then git's list catches up.
+  await repo.write('build/out.js', 'x')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  let seen = events
+  await repo.write('build/out.js', 'y')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(seen)
+
+  // A .gitignore edit replaces the list: notes/ goes quiet.
+  await repo.write('.gitignore', '.venv/\n*.db-wal\nbuild/\nnotes/\n')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  seen = events
+  await repo.write('notes/a.md', 'z')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(seen)
+
+  // And back: build/ is no longer ignored, so it is watched again.
+  await repo.write('.gitignore', '.venv/\n*.db-wal\nnotes/\n')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  seen = events
+  await repo.write('build/out.js', 'z')
+  await until(() => events > seen)
 })
