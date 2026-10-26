@@ -55,9 +55,10 @@ export function watchFolder(root: string, onEvent: () => void): () => void {
     return false
   }
 
+  /** One read at a time, at most one per `PEEK_MS`; a request during a read asks for one more after it. */
   function reread(): void {
-    again = true
-    if (timer === null && !reading) timer = setTimeout(() => void refresh(), PEEK_MS)
+    if (reading) again = true
+    else if (timer === null) timer = setTimeout(() => void refresh(), PEEK_MS)
   }
 
   async function refresh(): Promise<void> {

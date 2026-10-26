@@ -109,7 +109,7 @@ And the small things:
 
 - It starts at login, and it leaves the Dock when you close its window.
 - Right-click a folder to open it in Finder, Terminal, VS Code or on GitHub, or to give it a nickname.
-- Your `.gitignore` decides what syncs. A file too big for GitHub is never sent, and the window lists it.
+- Your `.gitignore` decides what syncs. AutoSync does not even watch what it ignores, so a `.venv` or a build folder costs nothing. A file too big for GitHub is never sent, and the window lists it.
 - Pause everything with one click.
 - Light and dark look.
 

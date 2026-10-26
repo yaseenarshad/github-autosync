@@ -10,7 +10,7 @@
 - The same file changed on two computers: GitHub's version stays, yours is kept beside it as `<name> (conflict <computer>, <date>)<ext>`. Syncing keeps going.
 - Files of 95 MiB or more are never committed (GitHub refuses them); they are listed as too big.
 - A repo mid-rebase, mid-merge or on a detached HEAD is left alone until you finish.
-- `.gitignore` is the only filter.
+- `.gitignore` is the only filter. What git ignores is not even watched, so a big ignored folder (a `.venv`, a build folder) costs nothing.
 - Settings live in the app's own `config.json` (macOS: `~/Library/Application Support/GitHub AutoSync/`); nothing is written into your folders.
 
 ## Team repos that require pull requests
