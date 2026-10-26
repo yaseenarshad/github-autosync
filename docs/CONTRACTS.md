@@ -119,7 +119,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **What the watcher skips** (D33): what git ignores, from `git status --ignored=matching`, plus `.git` and `node_modules` always.
   - One recursive OS watch per folder (FSEvents, ReadDirectoryChangesW). Events under ignored paths are dropped in the app.
   - A folder is skipped whole only when a pattern matches it. A folder whose files are all ignored (only a `.DS_Store`) stays watched.
-  - The list is read at the start, and again at most once per `PEEK_MS` after a path is created, renamed or deleted, or a `.gitignore`, `.git/index` or `.git/info/exclude` changes. Each read replaces it. After a failed read, any event reads again.
+  - The list is read at the start, and again at most once per `PEEK_MS` after a path is created, renamed or deleted, or a `.gitignore`, `.git/index` or `.git/info/exclude` changes (in a linked worktree or a submodule, where git keeps them outside the folder, too). Each read replaces it. After a failed read, any event reads again.
   - A new ignored file can start one peek before the list catches up. After that it is silent.
 - **Own writes:** watcher events during a pass, or within 1 s of one (`OWN_WRITES_MS`), are ignored. An edit made during a pass is caught by the pass's closing status.
 - **Offline:** exactly one retry after 2 min (`OFFLINE_RETRY_MS`).

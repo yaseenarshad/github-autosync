@@ -162,3 +162,24 @@ it('a force-added file wakes the folder again, and .git/info/exclude applies at 
   await sleep(400)
   expect(events.n).toBe(seen)
 })
+
+it('in a linked worktree, a force-added file wakes the folder again (S8: the index is outside the folder)', { timeout: 15_000 }, async () => {
+  const repo = await makeGitRepo()
+  cleanups.push(repo.cleanup)
+  await repo.write('.gitignore', '*.cfg\n')
+  await repo.write('note.md', 'x')
+  await repo.run(['add', '-A'])
+  await repo.run(['commit', '-m', 'base'])
+  const wt = `${repo.root}-wt`
+  await repo.run(['worktree', 'add', '-b', 'wt', wt])
+  cleanups.push(() => rm(wt, { recursive: true, force: true }))
+  await writeFile(path.join(wt, 'app.cfg'), 'x')
+  const events = await countEvents(wt)
+  await sleep(PEEK_MS + 500) // a setup event may still read the list again: let it settle
+
+  await repo.run(['-C', wt, 'add', '-f', 'app.cfg']) // tracked now: git no longer lists it
+  await sleep(PEEK_MS + 500)
+  const seen = events.n
+  await writeFile(path.join(wt, 'app.cfg'), 'z')
+  await until(() => events.n > seen)
+})

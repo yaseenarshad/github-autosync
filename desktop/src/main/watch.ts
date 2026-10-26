@@ -31,13 +31,42 @@ async function readIgnored(root: string): Promise<Set<string> | null> {
 }
 
 /**
+ * In a linked worktree or a submodule `.git` is a file: git's index and excludes live outside the
+ * folder, where the recursive watch never sees them. Then each gets a small watch of its own that
+ * calls `onRules`. A normal repo gets none. Returns the closers.
+ */
+async function watchOutsideGitDir(root: string, onRules: () => void): Promise<Array<() => void>> {
+  const bin = await findGit()
+  if (bin === null) return []
+  const res = await git(bin, root, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir']).catch(() => null)
+  const [gitDir, commonDir] = res?.code === 0 ? res.stdout.trim().split('\n') : []
+  if (gitDir === undefined || commonDir === undefined || path.resolve(gitDir) === path.join(root, '.git')) return []
+  const closers: Array<() => void> = []
+  for (const [dir, file] of [
+    [gitDir, 'index'],
+    [path.join(commonDir, 'info'), 'exclude'],
+  ] as const) {
+    try {
+      const w = watch(dir, (_event, name) => {
+        if (name === file) onRules()
+      })
+      w.on('error', () => undefined)
+      closers.push(() => w.close())
+    } catch {
+      // No `info/` folder yet: an exclude file made later applies from the next start.
+    }
+  }
+  return closers
+}
+
+/**
  * D3: any change under a synced folder is a trigger, except under what git ignores (D33).
  * One recursive OS watch covers the folder (FSEvents on macOS, ReadDirectoryChangesW on Windows),
  * so its cost does not grow with the files in it: chokidar 4 held one watch per path, 2.6 GB on a
  * repo with three `.venv`s. Events under ignored paths still arrive; a set lookup drops them.
  * Git's list is read at the start, and again at most once per `PEEK_MS` after a path is created,
- * renamed or deleted, a `.gitignore`, `.git/index` or `.git/info/exclude` changes, or any event
- * while the last read failed. Each read replaces the list. Until the first read, events go through.
+ * renamed or deleted, a `.gitignore`, `.git/index` or `.git/info/exclude` changes (also where a
+ * linked worktree keeps them), or any event while the last read failed. Each read replaces the list. Until the first read, events go through.
  * Errors (a folder removed while watched) are swallowed: the next pass reports the folder itself.
  */
 export function watchFolder(root: string, onEvent: () => void): () => void {
@@ -89,9 +118,15 @@ export function watchFolder(root: string, onEvent: () => void): () => void {
   }
   watcher.on('error', () => undefined)
   void refresh()
+  let outside: Array<() => void> = []
+  void watchOutsideGitDir(root, reread).then((closers) => {
+    if (closed) for (const close of closers) close()
+    else outside = closers
+  })
   return () => {
     closed = true
     if (timer !== null) clearTimeout(timer)
     watcher.close()
+    for (const close of outside) close()
   }
 }
