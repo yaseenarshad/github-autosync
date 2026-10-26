@@ -9,8 +9,8 @@ const client = resolve(here, '../client')
 
 export default defineConfig({
   main: {
-    // chokidar 4 is pure JS and gets bundled (electron-vite 5 externalizes deps by default), so the
-    // packaged app needs no node_modules at all.
+    // Bundle any dependency the main process imports (electron-vite 5 externalizes deps by default),
+    // so the packaged app needs no node_modules at all.
     resolve: { alias: { '@shared': shared } },
     build: { externalizeDeps: false, rollupOptions: { input: { index: resolve(here, 'src/main/index.ts') } } },
   },
