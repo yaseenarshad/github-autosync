@@ -116,8 +116,10 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - After a 1 s settle (`PEEK_MS`), `git status` decides.
   - Real changes mark the folder pending and arm a 30 s trailing debounce (`DEBOUNCE_MS`).
   - A clean look (an ignored file, or an edit undone) cancels the send.
-- **What the watcher skips** (D33): what git ignores, from `git ls-files --others --ignored --exclude-standard --directory`, plus `.git` and `node_modules` always.
-  - The list is read before the first scan, and again at most once per `PEEK_MS` after a new path or a `.gitignore` change.
+- **What the watcher skips** (D33): what git ignores, from `git status --ignored=matching`, plus `.git` and `node_modules` always.
+  - One recursive OS watch per folder (FSEvents, ReadDirectoryChangesW). Events under ignored paths are dropped in the app.
+  - A folder is skipped whole only when a pattern matches it. A folder whose files are all ignored (only a `.DS_Store`) stays watched.
+  - The list is read at the start, and again at most once per `PEEK_MS` after a path is created, renamed or deleted, or a `.gitignore`, `.git/index` or `.git/info/exclude` changes. Each read replaces it. After a failed read, any event reads again.
   - A new ignored file can start one peek before the list catches up. After that it is silent.
 - **Own writes:** watcher events during a pass, or within 1 s of one (`OWN_WRITES_MS`), are ignored. An edit made during a pass is caught by the pass's closing status.
 - **Offline:** exactly one retry after 2 min (`OFFLINE_RETRY_MS`).
@@ -177,4 +179,4 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D30** — A save that lands under a rebase is committed and replayed, never stashed: it goes through keep-both like any other edit.
 - **D31** — A tree that will not hold still for three tries is `pending`, not an `error`. The debounce tries again (30 s; 5 min in PR mode), and the one-hour notice (D7) covers a writer that never stops.
 - **D32** — A file some program rewrites on every pass is synced like any other. `.gitignore` stays the only filter (D9).
-- **D33** — The watcher skips what git ignores, as git itself reads it (every `.gitignore`, `.git/info/exclude`, the global excludes file). No built-in list beyond `.git` and `node_modules`. What gets committed does not change (D9).
+- **D33** — The watcher skips what git ignores, as git itself reads it (every `.gitignore`, `.git/info/exclude`, the global excludes file), through one recursive OS watch per folder. No built-in list beyond `.git` and `node_modules`. What gets committed does not change (D9).

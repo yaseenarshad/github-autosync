@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { PEEK_MS } from '@shared/status'
@@ -29,7 +29,8 @@ it('fires for a change anywhere in the folder but not inside .git or node_module
     events += 1
   })
   cleanups.push(close)
-  await new Promise((r) => setTimeout(r, 300)) // the initial scan
+  await new Promise((r) => setTimeout(r, 500))
+  events = 0 // FSEvents can still hand over the setup writes made just before the watch started
 
   await writeFile(path.join(root, '.git', 'index'), 'x')
   await writeFile(path.join(root, 'node_modules', 'pkg', 'index.js'), 'x')
@@ -58,7 +59,8 @@ it('skips what git ignores, picks up a new ignored folder, and follows a .gitign
     events += 1
   })
   cleanups.push(close)
-  await new Promise((r) => setTimeout(r, 300)) // git's list, then the initial scan
+  await new Promise((r) => setTimeout(r, 500))
+  events = 0 // FSEvents can still hand over the setup writes made just before the watch started
 
   await repo.write('.venv/lib/site.py', 'y')
   await repo.write('data/lab.db-wal', 'y')
@@ -90,4 +92,83 @@ it('skips what git ignores, picks up a new ignored folder, and follows a .gitign
   seen = events
   await repo.write('build/out.js', 'z')
   await until(() => events > seen)
+})
+
+it('a folder that holds only ignored files (a Finder .DS_Store) still wakes for a real file saved in it', { timeout: 10_000 }, async () => {
+  const repo = await makeGitRepo()
+  cleanups.push(repo.cleanup)
+  await repo.write('.gitignore', '.DS_Store\n')
+  await repo.write('notes/.DS_Store', 'x') // at start
+  let events = 0
+  const close = watchFolder(repo.root, () => {
+    events += 1
+  })
+  cleanups.push(close)
+  await new Promise((r) => setTimeout(r, 500))
+  events = 0 // FSEvents can still hand over the setup writes made just before the watch started
+  await repo.write('notes/todo.md', 'x')
+  await until(() => events > 0)
+
+  // A folder made after the start: Finder writes its .DS_Store first, then git's list is read.
+  await repo.write('drafts/.DS_Store', 'x')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  const seen = events
+  await repo.write('drafts/post.md', 'x')
+  await until(() => events > seen)
+})
+
+it('a failed read after a .gitignore edit tries again on the next event (S12)', { timeout: 15_000 }, async () => {
+  const repo = await makeGitRepo()
+  cleanups.push(repo.cleanup)
+  await repo.write('.gitignore', '\n')
+  await repo.write('notes/a.md', 'x')
+  await repo.write('cache/c.bin', 'x')
+  let events = 0
+  const close = watchFolder(repo.root, () => {
+    events += 1
+  })
+  cleanups.push(close)
+  await new Promise((r) => setTimeout(r, 500))
+  // git cannot read the repo for a moment, so the read after the edit fails
+  await rename(path.join(repo.root, '.git', 'HEAD'), path.join(repo.root, '.git', 'HEAD.off'))
+  await repo.write('.gitignore', 'cache/\n')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  await rename(path.join(repo.root, '.git', 'HEAD.off'), path.join(repo.root, '.git', 'HEAD'))
+  await repo.write('notes/a.md', 'y') // the next event: an edit to a tracked file
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  const seen = events
+  await repo.write('cache/c.bin', 'y')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(seen) // cache/ is ignored now
+})
+
+it('a force-added file wakes the folder again, and .git/info/exclude applies at once (S8, S11)', { timeout: 15_000 }, async () => {
+  const repo = await makeGitRepo()
+  cleanups.push(repo.cleanup)
+  await repo.write('.gitignore', '*.cfg\n')
+  await repo.write('app.cfg', 'x')
+  await repo.write('scratch/s.txt', 'x')
+  let events = 0
+  const close = watchFolder(repo.root, () => {
+    events += 1
+  })
+  cleanups.push(close)
+  await new Promise((r) => setTimeout(r, 500))
+  events = 0 // FSEvents can still hand over the setup writes made just before the watch started
+  await repo.write('app.cfg', 'y')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(0)
+
+  await repo.run(['add', '-f', 'app.cfg']) // tracked now: git no longer lists it
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  let seen = events
+  await repo.write('app.cfg', 'z')
+  await until(() => events > seen)
+
+  await repo.write('.git/info/exclude', 'scratch/\n')
+  await new Promise((r) => setTimeout(r, PEEK_MS + 500))
+  seen = events
+  await repo.write('scratch/s.txt', 'y')
+  await new Promise((r) => setTimeout(r, 400))
+  expect(events).toBe(seen)
 })

@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'chokidar'
+import { watch, type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import { PEEK_MS } from '@shared/status'
 import { findGit, git, zList } from './git/exec'
@@ -6,73 +6,56 @@ import { findGit, git, zList } from './git/exec'
 /** Git's own bookkeeping, and node_modules: skipped even when git cannot list what it ignores. */
 const SKIPPED = new Set(['.git', 'node_modules'])
 
+/** Writes inside `.git` that change what git ignores: a file tracked by force (`git add -f`), or the repo's own excludes. */
+const RULES_IN_GIT = new Set(['.git/index', '.git/info/exclude'])
+
 /**
- * What git ignores right now (D9), relative and `/`-separated: a wholly ignored folder once
- * (`--directory`), other ignored files one by one. Tracked files are never listed, so a force-added
- * file stays watched. Null when git cannot say: then only SKIPPED is skipped.
+ * What git ignores right now (D9), relative and `/`-separated. `--ignored=matching` names a folder
+ * only when a pattern matches it: a folder whose files just happen to be ignored (only a Finder
+ * `.DS_Store`) comes as those files, so a real file saved there still wakes the folder. Tracked files
+ * are never listed. Null when git cannot say: then only SKIPPED is skipped.
  */
 async function readIgnored(root: string): Promise<Set<string> | null> {
   const bin = await findGit()
   if (bin === null) return null
-  const res = await git(bin, root, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']).catch(() => null)
-  return res?.code === 0 ? new Set(zList(res).map((p) => p.replace(/\/$/, ''))) : null
-}
-
-/** Every path the watcher holds at or under `rels`: unwatching a folder alone leaves its files' watches open. */
-function heldUnder(w: FSWatcher, root: string, rels: readonly string[]): string[] {
-  const tops = rels.map((r) => path.join(root, r))
-  const out = new Set(tops)
-  for (const [dir, names] of Object.entries(w.getWatched())) {
-    for (const name of names) {
-      const full = path.join(dir, name)
-      if (tops.some((t) => full === t || full.startsWith(t + path.sep))) out.add(full)
-    }
+  const res = await git(bin, root, ['status', '--porcelain', '-z', '--ignored=matching', '--untracked-files=normal']).catch(() => null)
+  if (res?.code !== 0) return null
+  const out = new Set<string>()
+  const tokens = zList(res)
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i] ?? ''
+    if (entry.startsWith('!! ')) out.add(entry.slice(3).replace(/\/$/, ''))
+    else if (entry.charAt(0) === 'R' || entry.charAt(0) === 'C') i += 1 // `-z` puts the rename's old path in the next token
   }
-  return [...out]
+  return out
 }
 
 /**
- * D3: any change under a synced folder is a trigger, except under what git ignores (D33). A `.venv`,
- * a build folder or a database side file then never wakes the folder, and holds no OS watch.
- * Git's list is read before the first scan, and again at most once per `PEEK_MS`: after a new path
- * appears (the list only grows, and what it adds is unwatched) or a `.gitignore` changes (the list is
- * replaced; if a path is no longer ignored, the watcher scans afresh). `.git/info/exclude` and the
- * global excludes file apply from the next start or off/on.
+ * D3: any change under a synced folder is a trigger, except under what git ignores (D33).
+ * One recursive OS watch covers the folder (FSEvents on macOS, ReadDirectoryChangesW on Windows),
+ * so its cost does not grow with the files in it: chokidar 4 held one watch per path, 2.6 GB on a
+ * repo with three `.venv`s. Events under ignored paths still arrive; a set lookup drops them.
+ * Git's list is read at the start, and again at most once per `PEEK_MS` after a path is created,
+ * renamed or deleted, a `.gitignore`, `.git/index` or `.git/info/exclude` changes, or any event
+ * while the last read failed. Each read replaces the list. Until the first read, events go through.
  * Errors (a folder removed while watched) are swallowed: the next pass reports the folder itself.
  */
 export function watchFolder(root: string, onEvent: () => void): () => void {
   let ignored = new Set<string>()
-  let watcher: FSWatcher | null = null
+  let stale = true
   let closed = false
   let timer: ReturnType<typeof setTimeout> | null = null
   let reading = false
   let again = false
-  let replace = false
 
-  const isIgnored = (p: string): boolean => {
-    const segs = path.relative(root, p).split(path.sep)
+  const isIgnored = (rel: string): boolean => {
+    const segs = rel.split('/')
     if (segs.some((seg) => SKIPPED.has(seg))) return true
     for (let i = 1; i <= segs.length; i += 1) if (ignored.has(segs.slice(0, i).join('/'))) return true
     return false
   }
 
-  function start(list: Set<string>): void {
-    void watcher?.close()
-    ignored = list
-    const w = watch(root, { ignoreInitial: true, ignored: isIgnored })
-    w.on('all', (event, p) => {
-      // chokidar asks `ignored` only when it finds a path: one it already watches keeps reporting.
-      if (isIgnored(p)) return
-      const rules = path.basename(p) === '.gitignore'
-      if (rules || event === 'add' || event === 'addDir') reread(rules)
-      onEvent()
-    })
-    w.on('error', () => undefined)
-    watcher = w
-  }
-
-  function reread(rules: boolean): void {
-    replace ||= rules
+  function reread(): void {
     again = true
     if (timer === null && !reading) timer = setTimeout(() => void refresh(), PEEK_MS)
   }
@@ -81,27 +64,33 @@ export function watchFolder(root: string, onEvent: () => void): () => void {
     timer = null
     reading = true
     again = false
-    const full = replace
-    replace = false
     const next = await readIgnored(root)
     reading = false
-    if (closed || watcher === null) return
-    if (next === null) replace ||= full
-    else if (full && [...ignored].some((p) => !next.has(p))) start(next)
-    else {
-      const nowIgnored = [...next].filter((p) => !ignored.has(p))
-      ignored = new Set([...ignored, ...next])
-      if (nowIgnored.length > 0) watcher.unwatch(heldUnder(watcher, root, nowIgnored))
-    }
-    if (again) reread(false)
+    if (closed) return
+    stale = next === null
+    if (next !== null) ignored = next
+    if (again) reread()
   }
 
-  void readIgnored(root).then((first) => {
-    if (!closed) start(first ?? new Set())
-  })
+  let watcher: FSWatcher
+  try {
+    watcher = watch(root, { recursive: true }, (event, name) => {
+      if (closed) return
+      // No name: the OS dropped the detail. Let it through; the peek's `git status` decides.
+      const rel = name === null ? '' : name.split(path.sep).join('/')
+      if (RULES_IN_GIT.has(rel)) return reread()
+      if (isIgnored(rel)) return
+      if (event === 'rename' || stale || path.posix.basename(rel) === '.gitignore') reread()
+      onEvent()
+    })
+  } catch {
+    return () => undefined
+  }
+  watcher.on('error', () => undefined)
+  void refresh()
   return () => {
     closed = true
     if (timer !== null) clearTimeout(timer)
-    void watcher?.close()
+    watcher.close()
   }
 }
