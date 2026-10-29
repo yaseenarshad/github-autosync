@@ -23,7 +23,8 @@ afterEach(async () => {
 
 async function dir(name: string): Promise<string> {
   const d = await tempDir(name)
-  cleanups.push(() => rm(d, { recursive: true, force: true }))
+  // Windows holds a folder for a moment after the watcher and git let go (EBUSY): try again.
+  cleanups.push(() => rm(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }))
   return d
 }
 

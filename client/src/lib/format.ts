@@ -18,7 +18,6 @@ export function parentDir(path: string): string {
   return path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')))
 }
 
-/** `https://github.com/owner/repo` → `github.com/owner/repo` */
 /** `owner/repo` for a GitHub URL; the last part of any other remote (`lab.git` → `lab`). */
 export function repoLabel(url: string): string {
   const github = /github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)
@@ -26,6 +25,7 @@ export function repoLabel(url: string): string {
   return (url.replace(/\/+$/, '').split(/[/\\:]/).pop() ?? url).replace(/\.git$/, '')
 }
 
+/** `https://github.com/owner/repo` → `github.com/owner/repo` */
 export function webLabel(webUrl: string): string {
   return webUrl.replace(/^https:\/\//, '')
 }

@@ -119,7 +119,7 @@ function OtherComputers({ others, home, onSheet }: { others: OtherRepo[]; home: 
                 {o.cloning
                   ? 'Downloading…'
                   : o.gone
-                    ? 'Gone from GitHub'
+                    ? 'Gone from GitHub (or no access)'
                     : o.error !== null
                       ? o.error
                       : o.found !== null

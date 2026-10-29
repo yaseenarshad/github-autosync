@@ -62,7 +62,7 @@ function attentionBody(attention: Attention): string {
       return 'The command before each push failed. Nothing was pushed.'
     case 'outside-changed': {
       const files = attention.files ?? []
-      return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, and AutoSync holds it back. Syncing is waiting for you.`
+      return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, and AutoSync holds ${files.length === 1 ? 'it' : 'them'} back. Syncing is waiting for you.`
     }
     case 'error':
       return `Syncing has stopped: ${attention.detail ?? 'git failed'}`

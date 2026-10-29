@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { DEFAULT_SETTINGS } from '@shared/status'
 import type { OtherRepo } from '@shared/types'
 import { findGit, git } from './git/exec'
 import { isRepoRoot, repoKey } from './git/detect'
@@ -47,7 +48,8 @@ export function othersFrom(config: Config, files: readonly MacFile[], home: stri
         error: null,
         hidden: config.hiddenRepos.includes(key),
         gone: false,
-        settings: config.repos[key]?.settings ?? repo.settings,
+        // What "Start syncing" will really run with (9H): the newest saved settings, else this computer's defaults.
+        settings: config.repos[key]?.settings ?? (repo.savedAt > 0 ? repo.settings : { ...DEFAULT_SETTINGS, ...config.defaults }),
       })
     }
   }
@@ -61,15 +63,10 @@ async function keyAt(bin: string, dir: string): Promise<string | null> {
   return origin.code === 0 ? repoKey(origin.stdout.trim()) : null
 }
 
-/**
- * D53: where each repo is on this computer, if anywhere: the other computer's path with the home
- * folder swapped, else a folder beside this computer's synced folders (one level). Runs when the
- * window opens and when a settings file changes, never on a timer.
- */
 /** How long an answer from a remote is kept: the search runs on every window focus. */
 const GONE_TTL_MS = 10 * 60_000
-/** git's words for a remote that is not there; a network failure says something else and never counts. */
-const NOT_THERE = /repository not found|does not appear to be a git repository|does not exist|not found/i
+/** git's words for a remote that is not there, or that this account cannot see; a network failure says something else and never counts. */
+const NOT_THERE = /repository not found|does not appear to be a git repository|does not exist/i
 const goneCache = new Map<string, { gone: boolean; at: number }>()
 
 /** D35 (item 35): true when the remote answers that the repo is not there. Offline or slow: false, so nothing is hidden by mistake. */
@@ -82,6 +79,11 @@ async function goneFromRemote(bin: string, url: string): Promise<boolean> {
   return gone
 }
 
+/**
+ * D53: where each repo is on this computer, if anywhere: the other computer's path with the home
+ * folder swapped, else a folder beside this computer's synced folders (one level). Runs when the
+ * window opens and when a settings file changes, never on a timer.
+ */
 export async function findClones(others: readonly OtherRepo[], config: Config): Promise<OtherRepo[]> {
   const bin = await findGit()
   if (bin === null || others.length === 0) return [...others]

@@ -553,7 +553,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
       for (const [id, e] of entries) {
         if (next.has(id)) continue
         deactivate(e)
-        armWake(e)
+        if (e.wake !== null) clearTimeout(e.wake)
+        e.wake = null
       }
       entries = next
       for (const cfg of folders) {
