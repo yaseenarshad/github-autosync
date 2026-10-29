@@ -62,7 +62,7 @@ export function App() {
               <Banners status={status} onResume={() => setSheet({ kind: 'resume' })} />
               <div className="main-inner">
                 {folder ? (
-                  <FolderPage folder={folder} status={status} home={home} onSheet={setSheet} />
+                  <FolderPage folder={folder} status={status} onSheet={setSheet} />
                 ) : (
                   <Overview status={status} onSelect={setSelected} />
                 )}

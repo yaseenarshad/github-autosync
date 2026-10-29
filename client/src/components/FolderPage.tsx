@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
 import { checksEvery, clock, isGitHubUrl, OPENS_PR_AFTER, PAUSES, plural, SENDS_AFTER } from '@shared/status'
-import { formatBytes, tildify, webLabel } from '../lib/format'
+import { formatBytes, repoLabel, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
 import { folderView, type FolderView } from '../lib/summary'
@@ -16,11 +16,10 @@ import { Ago, Countdown, LastSynced } from './Time'
 interface Props {
   folder: FolderStatus
   status: AppStatus
-  home: string | null
   onSheet: (sheet: SheetState) => void
 }
 
-export function FolderPage({ folder: f, status, home, onSheet }: Props) {
+export function FolderPage({ folder: f, status, onSheet }: Props) {
   const v = folderView(f, status)
   const active = f.enabled && !status.paused && f.pausedUntil === null
   const problem = f.attention && f.attention.kind !== 'no-git' && active && !status.gitMissing ? f.attention : null
@@ -44,26 +43,19 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
               </span>
             </div>
           </div>
-          {/* Path and repo on one quiet line; the branch is in the toolbar. */}
-          <div className="meta">
-            <span className="path" title={f.path}>
-              {tildify(f.path, home)}
-            </span>
-            {(f.webUrl || f.remoteUrl) && (
-              <>
-                <span className="sep">·</span>
-                {f.webUrl ? (
-                  <button className="link one" title={f.webUrl} onClick={() => api.openExternal(f.webUrl!)}>
-                    {webLabel(f.webUrl)}
-                  </button>
-                ) : (
-                  <span className="one" title={f.remoteUrl ?? undefined}>
-                    {f.remoteUrl}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
+          {/* Only the repo, as GitHub Desktop and Fork show it. The folder's place is in the sidebar group and Reveal in Finder; the branch is in the toolbar. */}
+          {(f.webUrl || f.remoteUrl) && (
+            <div className="meta">
+              {f.webUrl ? (
+                <button className="link one" onClick={() => api.openExternal(f.webUrl!)}>
+                  {repoLabel(f.webUrl)}
+                  <Icon name="ext" />
+                </button>
+              ) : (
+                <span className="one">{repoLabel(f.remoteUrl ?? '')}</span>
+              )}
+            </div>
+          )}
           <div className="pills">
             {f.publishVia === 'pr' && (
               <span className="pill">
