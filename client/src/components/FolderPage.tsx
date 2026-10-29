@@ -30,7 +30,19 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
     <>
       <div className="head">
         <div className="grow">
-          <h1>{f.name}</h1>
+          <div className="title-row">
+            <h1>{f.name}</h1>
+            {/* The folder's state, as one quiet line beside its name: no card unless something needs the user. */}
+            <div className={`status ${v.cls}`}>
+              <span className="big">
+                <Icon name={v.icon} />
+              </span>
+              <span className="h">{v.head}</span>
+              <span className="s">
+                <StatusSub folder={f} view={v} />
+              </span>
+            </div>
+          </div>
           <div className="path" title={f.path}>
             {tildify(f.path, home)}
           </div>
@@ -59,39 +71,29 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
             )}
           </div>
         </div>
-        <button
-          className={`switch ${f.enabled ? 'on' : ''}`}
-          role="switch"
-          aria-checked={f.enabled}
-          onClick={() => onSheet({ kind: f.enabled ? 'folder-off' : 'folder-on', id: f.id })}
-        >
-          <span>{f.enabled ? 'Syncing' : 'Sync off'}</span>
-          <span className="track" />
-        </button>
-      </div>
-
-      <div className={`status ${v.cls}`}>
-        <div className="big">
-          <Icon name={v.icon} />
-        </div>
-        <div className="grow">
-          <div className="h">{v.head}</div>
-          <div className="s">
-            <StatusSub folder={f} view={v} />
-          </div>
-        </div>
-        {v.kind === 'paused-until' && (
-          <button className="btn" onClick={() => api.pauseFolder(f.id, null)}>
-            <Icon name="sync" />
-            Resume now
+        <div className="head-acts">
+          {v.kind === 'paused-until' && (
+            <button className="btn" onClick={() => api.pauseFolder(f.id, null)}>
+              <Icon name="sync" />
+              Resume now
+            </button>
+          )}
+          {active && !status.gitMissing && v.cls !== 'syncing' && (
+            <button className="btn" onClick={() => api.syncNow(f.id)}>
+              <Icon name={pushesLater(f) ? 'up' : 'sync'} />
+              {pushesLater(f) ? 'Push now' : 'Sync now'}
+            </button>
+          )}
+          <button
+            className={`switch ${f.enabled ? 'on' : ''}`}
+            role="switch"
+            aria-checked={f.enabled}
+            onClick={() => onSheet({ kind: f.enabled ? 'folder-off' : 'folder-on', id: f.id })}
+          >
+            <span>{f.enabled ? 'Syncing' : 'Sync off'}</span>
+            <span className="track" />
           </button>
-        )}
-        {active && !status.gitMissing && v.cls !== 'syncing' && (
-          <button className="btn" onClick={() => api.syncNow(f.id)}>
-            <Icon name={pushesLater(f) ? 'up' : 'sync'} />
-            {pushesLater(f) ? 'Push now' : 'Sync now'}
-          </button>
-        )}
+        </div>
       </div>
 
       {problem && <ProblemCard folder={f} attention={problem} />}
