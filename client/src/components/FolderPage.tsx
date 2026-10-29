@@ -11,7 +11,7 @@ import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
 import { Fold } from './Fold'
 import { SyncSettings } from './SyncSettings'
-import { Countdown, LastSynced } from './Time'
+import { Ago, Countdown, LastSynced } from './Time'
 
 interface Props {
   folder: FolderStatus
@@ -33,30 +33,38 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
           <div className="title-row">
             <h1>{f.name}</h1>
             {/* The folder's state, as one quiet line beside its name: no card unless something needs the user. */}
-            <div className={`status ${v.cls}`}>
+            {/* Fine is a few words, with the detail on hover; anything to act on keeps its line. */}
+            <div className={`status ${v.cls} ${v.kind === 'synced' ? 'quiet' : ''}`}>
               <span className="big">
                 <Icon name={v.icon} />
               </span>
-              <span className="h">{v.head}</span>
+              <span className="h">{v.kind === 'synced' && f.lastSyncedAt !== null ? <>Synced <Ago at={f.lastSyncedAt} /></> : v.head}</span>
               <span className="s">
                 <StatusSub folder={f} view={v} />
               </span>
             </div>
           </div>
-          <div className="path" title={f.path}>
-            {tildify(f.path, home)}
-          </div>
-          <div className="pills">
-            <span className="pill">
-              <Icon name="branch" />
-              {f.branch ?? 'No branch'} ⇄ origin
+          {/* Path and repo on one quiet line; the branch is in the toolbar. */}
+          <div className="meta">
+            <span className="path" title={f.path}>
+              {tildify(f.path, home)}
             </span>
             {(f.webUrl || f.remoteUrl) && (
-              <span className="pill" title={f.remoteUrl ?? undefined}>
-                <Icon name="ext" />
-                <span className="one">{f.webUrl ? webLabel(f.webUrl) : f.remoteUrl}</span>
-              </span>
+              <>
+                <span className="sep">·</span>
+                {f.webUrl ? (
+                  <button className="link one" title={f.webUrl} onClick={() => api.openExternal(f.webUrl!)}>
+                    {webLabel(f.webUrl)}
+                  </button>
+                ) : (
+                  <span className="one" title={f.remoteUrl ?? undefined}>
+                    {f.remoteUrl}
+                  </span>
+                )}
+              </>
             )}
+          </div>
+          <div className="pills">
             {f.publishVia === 'pr' && (
               <span className="pill">
                 <Icon name="up" />

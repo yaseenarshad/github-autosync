@@ -241,6 +241,17 @@ button.tb[disabled] { cursor: not-allowed; opacity: .55; }
 .status .h { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .status .s { color: var(--muted); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status .s::before { content: "·"; margin-right: 6px; }
+/* Synced: the detail (last synced, how often it checks) shows on hover. */
+.status.quiet { position: relative; cursor: default; }
+.status.quiet .s { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: max-content; max-width: 340px; padding: 6px 9px; border-radius: 6px;
+  background: var(--toolbar); color: var(--toolbar-text); white-space: normal; opacity: 0; pointer-events: none; transition: opacity .1s; }
+.status.quiet .s::before { content: none; }
+.status.quiet:hover .s { opacity: 1; }
+.meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.meta .path { font-family: var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.meta .one { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; font-size: 12px; }
+.meta .sep { flex: none; }
+.pills:empty { display: none; }
 .status.synced .h { color: var(--ok); }
 .status.pending .h { color: var(--warn); }
 .status.attention .h { color: var(--bad); }
