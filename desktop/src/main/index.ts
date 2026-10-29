@@ -127,6 +127,8 @@ function createWindow(): BrowserWindow {
     app.dock?.hide() // D17: no Dock icon while the app lives only in the menu bar
   })
   created.once('ready-to-show', () => created.show())
+  // D53: a repo cloned by hand while the app ran shows as "Already on this Mac" once the user comes back to the window.
+  created.on('focus', () => findOthers())
   if (process.env.ELECTRON_RENDERER_URL) void created.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void created.loadFile(join(__dirname, '../renderer/index.html'))
   return created

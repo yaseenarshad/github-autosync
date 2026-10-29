@@ -446,6 +446,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
   white-space: normal; text-align: left; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); opacity: 0; pointer-events: none; transition: opacity .1s;
 }
 .info:hover::after, .info:focus::after { opacity: 1; }
+.info:not([data-tip])::after, .info[aria-expanded="true"]::after { display: none; }
 .info .ico { width: 13px; height: 13px; }
 .section h2 .info { margin-left: 2px; }
 .fold > h2 { margin-bottom: 0; }

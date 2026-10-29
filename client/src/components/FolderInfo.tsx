@@ -26,7 +26,7 @@ export function FolderInfo({ folder: f }: { folder: FolderStatus }) {
 
   return (
     <span className="folder-info" ref={box}>
-      <button type="button" className="info" aria-label="Where this folder is" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="info" aria-label="Where this folder is" data-tip={`Where it is on ${platform.here}: click for the path`} aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="info" />
       </button>
       {open && (
