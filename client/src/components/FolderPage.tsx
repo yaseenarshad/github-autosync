@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
-import { CHECKS_EVERY, isGitHubUrl, OPENS_PR_AFTER, plural, SENDS_AFTER } from '@shared/status'
+import { checksEvery, clock, isGitHubUrl, OPENS_PR_AFTER, plural, SENDS_AFTER } from '@shared/status'
 import { formatBytes, tildify, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
@@ -79,8 +79,8 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
         </div>
         {active && !status.gitMissing && v.cls !== 'syncing' && (
           <button className="btn" onClick={() => api.syncNow(f.id)}>
-            <Icon name="sync" />
-            Sync now
+            <Icon name={pushesLater(f) ? 'up' : 'sync'} />
+            {pushesLater(f) ? 'Push now' : 'Sync now'}
           </button>
         )}
       </div>
@@ -114,6 +114,20 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
           </Action>
         </div>
       </div>
+    </>
+  )
+}
+
+/** D52: changes wait for a timer or for the user, so the button sends them now. */
+const pushesLater = (f: FolderStatus): boolean => f.pending.length > 0 && f.settings.push !== 'auto'
+
+/** " · next check in 3:12" while a pull is armed on a repo that does not send at once (D52). */
+function NextCheck({ folder: f }: { folder: FolderStatus }) {
+  if (f.pullAt === null || f.settings.push === 'auto') return null
+  return (
+    <>
+      {' '}
+      · next check in <Countdown at={f.pullAt} />
     </>
   )
 }
@@ -156,7 +170,23 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
           </>
         )
       }
+      if (f.settings.push === 'manual') {
+        return (
+          <>
+            You push this repo by hand — press Push now to send
+            <NextCheck folder={f} />
+          </>
+        )
+      }
       if (f.sendAt === null) return <>Waiting for the next pass.</>
+      if (f.settings.push !== 'auto') {
+        return (
+          <>
+            {f.publishVia === 'pr' ? 'Opens a PR' : 'Sends'} at {clock(f.sendAt)} (in <Countdown at={f.sendAt} />)
+            <NextCheck folder={f} />
+          </>
+        )
+      }
       return f.publishVia === 'pr' ? (
         <>
           Opens a PR in <Countdown at={f.sendAt} /> — {OPENS_PR_AFTER}.
@@ -169,7 +199,7 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
     case 'synced':
       return (
         <>
-          <LastSynced at={f.lastSyncedAt} /> · checks GitHub {CHECKS_EVERY}
+          <LastSynced at={f.lastSyncedAt} /> · checks GitHub {checksEvery(f.settings.pull)}
         </>
       )
   }
@@ -323,9 +353,13 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
         ? 'Waiting — fix the problem above'
         : f.pr
           ? `Waiting — in PR #${f.pr.number}`
-          : f.publishVia === 'pr'
-            ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
-            : `Waiting — sends ${SENDS_AFTER}`
+          : f.settings.push === 'manual'
+            ? 'Waiting — you push by hand'
+            : f.settings.push !== 'auto' && f.sendAt !== null
+              ? `Waiting — ${f.publishVia === 'pr' ? 'opens a PR' : 'sends'} at ${clock(f.sendAt)}`
+              : f.publishVia === 'pr'
+                ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
+                : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
   const count = f.pending.length + f.tooBig.length + (ignored ? 1 : 0)
 

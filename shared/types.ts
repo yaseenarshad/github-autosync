@@ -110,6 +110,8 @@ export interface FolderStatus {
   sendAt: number | null
   /** When the single offline retry fires (D3). */
   retryAt: number | null
+  /** D52: when the next pull runs; null when none is armed (pulls by hand, or Auto's send is about to pull). */
+  pullAt: number | null
 }
 
 export interface AppStatus {

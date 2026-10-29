@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode, PR mode (D24, D26).
 import path from 'node:path'
-import { DEBOUNCE_MS, DEFAULT_SETTINGS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
+import { AUTO_CAP_MS, DEBOUNCE_MS, DEFAULT_SETTINGS, MINUTE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, PR_CAP_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
 import type { Attention, AttentionKind, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, RepoSettings, SyncState, TooBigFile } from '@shared/types'
 import { repoKey, webUrlOf } from './detect'
 import type { RepoPolicy } from './github'
@@ -17,17 +17,19 @@ import type { PassResult } from './sync'
  *   - START and ENABLE pull: a folder turns on with a pass.
  *   - EDITS settle first. A watcher event is only a hint: once the burst pauses (`peekMs`, 1 s)
  *     `git status` says whether anything really changed. Real changes mark the folder pending and
- *     start a trailing debounce (`quietMs`, 30 s, the UI counts down to `sendAt`) that every later
- *     save pushes back; a clean look (an ignored file, an edit undone) cancels it.
+ *     arm the push (`sendAt`, D37): in Auto a trailing debounce (`quietMs`, 30 s) that every later
+ *     save pushes back, never past `capMs` (5 min) after the first change (D38); with a time, a
+ *     fixed timer from the first change; by hand, none. A clean look cancels it.
  *   - AUTOSYNC'S OWN WRITES are not edits: a rebase bringing the other computers' changes in lands
  *     while its pass runs or just after (`ownWritesMs`, 1 s), and those events are dropped. An edit
  *     the user made during a pass is still caught: the pass's closing `git status` finds it.
  *   - OFFLINE waits patiently: exactly one retry (`retryMs`, 2 min, `retryAt`). Wake covers the
  *     common "laptop came back" case sooner than any backoff ladder would.
  *   - WAKE/UNLOCK pull, behind a cooldown, so opening the lid converges without a git storm.
- *   - IDLE pulls: a pass that ended level arms a QUIET pass (`pollMs`, 60 s) — no `syncing` flash —
- *     so a folder nobody is editing still receives the other computers' changes. Never while edits
- *     settle (their pass is coming), never after a failure (the retry, or the user, owns that).
+ *   - PULLS: a pass arms a QUIET pass every `settings.pull` minutes (D39) — no `syncing` flash — so
+ *     a folder still receives the other computers' changes, also while its own wait for their push.
+ *     A quiet pass commits here, fetches and rebases, and never pushes (D40). In Auto it stands down
+ *     while a send is armed (the send pulls first); never after a failure (the retry, or the user, owns that).
  *     Conflict copies do not stop it: keep-both already settled the conflict. Nor does a zero-write
  *     refusal the user settles outside the app (a closed PR, the other app, a busy repo): the poll
  *     is how the folder notices.
@@ -74,7 +76,11 @@ export interface SyncHost {
   onChange(): void
   quietMs?: number
   retryMs?: number
-  pollMs?: number
+  /** One minute of the per-repo settings (D37, D39); tests shrink it. */
+  minuteMs?: number
+  /** D38: Auto never waits longer than this after the first unsent change (PR mode: `prCapMs`). */
+  capMs?: number
+  prCapMs?: number
   wakeCooldownMs?: number
   peekMs?: number
   ownWritesMs?: number
@@ -115,12 +121,16 @@ interface Entry {
   direction: 'up' | 'down' | null
   /** When the last pass finished — the wake cooldown reads this. */
   lastPassAt: number
-  debounce: Timer | null
+  /** D37: the push — Auto's debounce, or a fixed timer from the first unsent change. */
+  send: Timer | null
   retry: Timer | null
+  /** D39: the next pull, or the check on an open PR (D26). */
   poll: Timer | null
   peek: Timer | null
   sendAt: number | null
   retryAt: number | null
+  /** D52: when the next pull runs; null while none is armed. */
+  pullAt: number | null
   // What the last pass (or peek) found.
   attention: Attention | null
   offline: boolean
@@ -145,10 +155,12 @@ function arm(ms: number, fn: () => void): Timer {
   return timer
 }
 
-function clearTimers(e: Entry): void {
-  for (const timer of [e.debounce, e.retry, e.poll, e.peek]) if (timer !== null) clearTimeout(timer)
-  e.debounce = e.retry = e.poll = e.peek = null
-  e.sendAt = e.retryAt = null
+/** Every timer, or all but the push (a pull never moves the push, D40). */
+function clearTimers(e: Entry, keepSend = false): void {
+  for (const timer of [keepSend ? null : e.send, e.retry, e.poll, e.peek]) if (timer !== null) clearTimeout(timer)
+  if (!keepSend) e.send = e.sendAt = null
+  e.retry = e.poll = e.peek = null
+  e.retryAt = e.pullAt = null
 }
 
 function fresh(cfg: FolderConfig): Entry {
@@ -161,12 +173,13 @@ function fresh(cfg: FolderConfig): Entry {
     syncing: false,
     direction: null,
     lastPassAt: 0,
-    debounce: null,
+    send: null,
     retry: null,
     poll: null,
     peek: null,
     sendAt: null,
     retryAt: null,
+    pullAt: null,
     attention: null,
     offline: false,
     branch: null,
@@ -223,6 +236,7 @@ function toStatus(e: Entry): FolderStatus {
     pendingSince: e.pendingSince,
     sendAt: e.sendAt,
     retryAt: e.retryAt,
+    pullAt: e.pullAt,
   }
 }
 
@@ -272,7 +286,9 @@ const SETTLED_OUTSIDE: ReadonlySet<AttentionKind> = new Set(['pr-closed', 'other
 export function createSyncManager(host: SyncHost): SyncManager {
   const quietMs = host.quietMs ?? DEBOUNCE_MS
   const retryMs = host.retryMs ?? OFFLINE_RETRY_MS
-  const pollMs = host.pollMs ?? POLL_MS
+  const minuteMs = host.minuteMs ?? MINUTE_MS
+  const capMs = host.capMs ?? AUTO_CAP_MS
+  const prCapMs = host.prCapMs ?? PR_CAP_MS
   const wakeCooldownMs = host.wakeCooldownMs ?? WAKE_COOLDOWN_MS
   const peekMs = host.peekMs ?? PEEK_MS
   const ownWritesMs = host.ownWritesMs ?? OWN_WRITES_MS
@@ -307,8 +323,9 @@ export function createSyncManager(host: SyncHost): SyncManager {
    */
   async function runPass(e: Entry, mode: PassMode): Promise<void> {
     e.busy = true
-    // The pass commits whatever the debounce was waiting for; an edit made during it re-arms one.
-    clearTimers(e)
+    // A send commits what its timer waited for; an edit made during it arms the next one. A pull
+    // (`quiet`) never sends, so the push keeps its time (D40).
+    clearTimers(e, mode === 'quiet')
     if (mode !== 'quiet') {
       e.syncing = true
       e.direction = null
@@ -330,6 +347,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
     e.direction = null
     e.lastPassAt = Date.now()
     if (current(e)) {
+      // A send that ended level sent everything up to its start: what is left is a new run of changes.
+      if (mode !== 'quiet' && res.level) e.pendingSince = null
       apply(e, res)
       if (e.active && mode !== 'flush') {
         if (res.offline) {
@@ -342,11 +361,14 @@ export function createSyncManager(host: SyncHost): SyncManager {
         // Conflict copies never stop syncing; any other attention, or offline, leaves the next move to the retry or the user.
         const stopped = res.offline || (res.attention !== null && res.attention.kind !== 'conflict')
         // D26: a batch is out — check back soon whether it merged, instead of idling.
-        if (res.pr !== null) armPoll(e, prCheckMs)
-        // Something left to send: saved while the pass ran, or a quiet pass landed a batch it may not send (D24).
-        else if (!stopped && e.pending.length > 0) armDebounce(e)
-        // Level, or refused with zero writes for something the user settles outside the app: look again quietly.
-        else if (res.level || (res.attention !== null && SETTLED_OUTSIDE.has(res.attention.kind))) armPoll(e, pollMs)
+        if (res.pr !== null) armCheck(e, prCheckMs)
+        else {
+          // Something left to send: saved while the pass ran, or committed by a pull that may not send (D40).
+          if (!stopped && e.pending.length > 0) armSend(e)
+          else cancelSend(e)
+          // Pulls keep coming while changes wait (D39), and after a zero-write refusal the user settles outside the app.
+          if (!stopped || (res.attention !== null && SETTLED_OUTSIDE.has(res.attention.kind))) armPull(e)
+        }
       }
       host.onChange()
     }
@@ -359,34 +381,79 @@ export function createSyncManager(host: SyncHost): SyncManager {
     else void runPass(e, follow.mode).then(follow.resolve)
   }
 
+  /** D37, D38: when the waiting changes go; null is only by hand. */
+  function sendTime(e: Entry, now: number): number | null {
+    const { push } = settingsOf(e)
+    if (push === 'manual') return null
+    const since = e.pendingSince ?? now
+    if (push !== 'auto') return since + push * minuteMs
+    const pr = publishVia(e) === 'pr'
+    return Math.min(now + (pr ? prQuietMs : quietMs), since + (pr ? prCapMs : capMs))
+  }
+
   /**
-   * Sends in `quietMs` (`prQuietMs` in PR mode), pushed back by every call — and the idle poll stands
-   * down: the send is coming. Never while a batch's PR is open: its check commits the edits and keeps
-   * running, and landing the batch arms the send.
+   * Arms the push. Auto (D3, D24) moves with every edit, up to its cap (D38), and the idle pull
+   * stands down: the send is seconds away and pulls first anyway. A fixed timer (D37) keeps its
+   * time once armed. Never while a batch's PR is open: its check commits the edits, and landing the
+   * batch arms the send.
    */
-  function armDebounce(e: Entry): void {
+  function armSend(e: Entry): void {
     if (e.pr !== null) return
-    for (const timer of [e.debounce, e.poll]) if (timer !== null) clearTimeout(timer)
-    e.poll = null
-    const ms = publishVia(e) === 'pr' ? prQuietMs : quietMs
-    e.sendAt = Date.now() + ms
-    e.debounce = arm(ms, () => {
-      e.debounce = e.sendAt = null
+    const auto = settingsOf(e).push === 'auto'
+    if (e.send !== null && !auto) return
+    cancelSend(e)
+    const at = sendTime(e, Date.now())
+    if (at === null) return
+    if (auto && e.poll !== null) {
+      clearTimeout(e.poll)
+      e.poll = e.pullAt = null
+    }
+    e.sendAt = at
+    e.send = arm(Math.max(0, at - Date.now()), () => {
+      e.send = e.sendAt = null
       void requestPass(e, 'normal')
     })
   }
 
-  /** A quiet pass in `ms`: the idle pull, or the check on an open PR. */
-  function armPoll(e: Entry, ms: number): void {
+  function cancelSend(e: Entry): void {
+    if (e.send !== null) clearTimeout(e.send)
+    e.send = e.sendAt = null
+  }
+
+  /** D39: the next pull, unless pulls are by hand, one is armed, or Auto's send is about to pull anyway. */
+  function armPull(e: Entry): void {
+    const { pull, push } = settingsOf(e)
+    if (pull === 'manual' || e.poll !== null || (push === 'auto' && e.send !== null)) return
+    const ms = pull * minuteMs
+    e.pullAt = Date.now() + ms
+    e.poll = arm(ms, () => {
+      e.poll = e.pullAt = null
+      void requestPass(e, 'quiet')
+    })
+  }
+
+  /** D26: a quiet look at an open PR, in place of the pull. */
+  function armCheck(e: Entry, ms: number): void {
     e.poll = arm(ms, () => {
       e.poll = null
       void requestPass(e, 'quiet')
     })
   }
 
+  /** Settings changed (D34): the timers follow at once. */
+  function retime(e: Entry): void {
+    if (e.busy || e.pr !== null) return
+    cancelSend(e)
+    if (e.poll !== null) clearTimeout(e.poll)
+    e.poll = e.pullAt = null
+    if (e.pending.length > 0) armSend(e)
+    armPull(e)
+  }
+
   function onEvent(e: Entry): void {
     if (!e.active || e.busy || Date.now() - e.lastPassAt < ownWritesMs) return
-    if (e.debounce !== null) armDebounce(e)
+    // Auto moves with every edit (D3); a fixed timer does not (D37).
+    if (e.send !== null && settingsOf(e).push === 'auto') armSend(e)
     if (e.peek !== null) clearTimeout(e.peek)
     e.peek = arm(peekMs, () => {
       e.peek = null
@@ -398,22 +465,24 @@ export function createSyncManager(host: SyncHost): SyncManager {
         .then((pending) => {
           if (pending === null || e.busy || !e.active || !current(e)) return
           setPending(e, pending)
-          if (e.pending.length > 0 && e.debounce === null) armDebounce(e)
-          if (e.pending.length === 0 && e.debounce !== null) {
+          if (e.pending.length > 0 && e.send === null) armSend(e)
+          if (e.pending.length === 0 && e.send !== null) {
             // Undone before it was sent: nothing to send, so back to idling.
-            clearTimeout(e.debounce)
-            e.debounce = e.sendAt = null
-            armPoll(e, pollMs)
+            cancelSend(e)
+            armPull(e)
           }
           host.onChange()
         })
     })
   }
 
+  /** A send, unless this repo pushes on a timer or by hand: then a pull, so nothing goes early (D37). */
+  const startMode = (e: Entry): PassMode => (settingsOf(e).push === 'auto' ? 'normal' : 'quiet')
+
   function activate(e: Entry): void {
     e.active = true
     e.unwatch = host.watch(e.cfg.path, () => onEvent(e))
-    void requestPass(e, 'normal')
+    void requestPass(e, startMode(e))
   }
 
   /** Watcher closed and every timer cleared. A pass already running finishes, but arms nothing and runs no follow-up. */
@@ -433,10 +502,12 @@ export function createSyncManager(host: SyncHost): SyncManager {
       entries = next
       for (const cfg of folders) {
         const e = next.get(cfg.id) as Entry
+        const before = settingsOf(e)
         e.cfg = cfg
         const wanted = cfg.enabled && !paused
         if (wanted && !e.active) activate(e)
         else if (!wanted && e.active) deactivate(e)
+        else if (e.active && JSON.stringify(before) !== JSON.stringify(settingsOf(e))) retime(e)
       }
       host.onChange()
     },
@@ -454,7 +525,10 @@ export function createSyncManager(host: SyncHost): SyncManager {
       const now = Date.now()
       for (const e of entries.values()) {
         if (e.busy || now - e.lastPassAt < wakeCooldownMs) continue
-        void requestPass(e, 'normal')
+        // D39: a wake pulls; it sends only where sends are Auto anyway, and stays quiet where pulls are by hand.
+        const { push, pull } = settingsOf(e)
+        if (push === 'auto') void requestPass(e, 'normal')
+        else if (pull !== 'manual') void requestPass(e, 'quiet')
       }
     },
 
@@ -466,7 +540,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
         e.unwatch?.()
         e.unwatch = null
         clearTimers(e)
-        jobs.push(requestPass(e, 'flush'))
+        // D42: a repo pushed by hand is left exactly as it is.
+        if (settingsOf(e).push !== 'manual') jobs.push(requestPass(e, 'flush'))
       }
       await Promise.all(jobs)
     },

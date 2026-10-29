@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { Attention } from '@shared/types'
+import { DEFAULT_SETTINGS, MINUTE_MS } from '@shared/status'
 import { createNoticeRules, PENDING_NOTICE_MS } from './notify'
 import { makeFolder, makeStatus } from '@shared/testFixtures'
 
 const NOW = 1_800_000_000_000
 const conflict = (...copies: string[]): Attention => ({ kind: 'conflict', conflicts: copies.map((copy) => ({ original: copy.replace(/ \(conflict.*\)/, ''), copy })) })
+
+describe('the pending notice follows the push time (D43)', () => {
+  it('comes an hour after a timer was due, never early, and never for a repo pushed by hand', () => {
+    const hourly = { ...DEFAULT_SETTINGS, push: 60 }
+    const since = NOW - PENDING_NOTICE_MS - 30 * MINUTE_MS
+    // 90 minutes of unsent changes on a 1-hour timer: due 30 minutes ago, so no notice yet.
+    expect(createNoticeRules()(makeStatus([makeFolder({ state: 'pending', pendingSince: since, settings: hourly })]), NOW)).toEqual([])
+    expect(createNoticeRules()(makeStatus([makeFolder({ state: 'pending', pendingSince: since - 30 * MINUTE_MS, settings: hourly })]), NOW)).toHaveLength(1)
+    expect(createNoticeRules()(makeStatus([makeFolder({ state: 'pending', pendingSince: 0, settings: { ...hourly, push: 'manual' } })]), NOW)).toEqual([])
+  })
+})
 
 describe('notice rules (D7)', () => {
   it('fires once when a folder ENTERS attention, not while it persists, and again after it cleared', () => {

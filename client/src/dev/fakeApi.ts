@@ -38,6 +38,7 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     pendingSince: null,
     sendAt: null,
     retryAt: null,
+    pullAt: null,
     ...extra,
   }
 }

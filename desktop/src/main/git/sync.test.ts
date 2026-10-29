@@ -580,7 +580,8 @@ describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TI
 
     expect(await pass(repo)).toMatchObject({ attention: null, level: true })
 
-    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    // The late save's commit and the pass's own fold into one before the push (D41).
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
     expect(await repo.read('note.md')).toBe('saved mid-rebase\n')
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
     // Nothing to settle or abort: the refused rebase never touched the save.
@@ -651,4 +652,52 @@ describe('flush mode (quit)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(calls.some(([, , args]) => args[0] === 'fetch')).toBe(false)
     expect(calls.filter(([, , args]) => args[0] === 'push').map(([, , , opts]) => opts?.timeoutMs)).toEqual([5_000])
   })
+})
+
+describe('pulls never push; one commit per push (D40, D41)', () => {
+  const log = async (repo: GitRepo, range: string) => (await repo.run(['log', '--format=%s', range])).split('\n').filter((l) => l !== '')
+
+  it(
+    'three pulls with edits between them commit here only; the send then pushes them as one commit',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const b = await otherComputer(remote)
+
+      for (const [i, file] of ['a.md', 'b.md', 'c.md'].entries()) {
+        await repo.write(file, `edit ${i}\n`)
+        await pushFrom(b, { [`theirs-${i}.md`]: 'x\n' })
+        const pulled = await pass(repo, { publish: false })
+        expect(pulled).toMatchObject({ attention: null, fetched: true, level: false })
+      }
+      expect(await repo.read('theirs-2.md')).toBe('x\n') // their changes came in
+      expect(await log(repo, '@{u}..HEAD')).toHaveLength(3) // ours stayed here
+      expect((await log(repo, '@{u}')).filter((s) => s.startsWith('sync (Mac-A)'))).toEqual([]) // nothing of ours reached GitHub
+
+      const sent = await pass(repo)
+      expect(sent).toMatchObject({ attention: null, level: true })
+      await b.run(['fetch', '-q'])
+      const mine = (await log(b, 'HEAD..origin/main')).filter((s) => s.startsWith('sync (Mac-A)'))
+      expect(mine).toEqual([commitMessage('Mac-A', ['a.md', 'b.md', 'c.md'])])
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'never folds a commit the user made by hand: everything goes as it is',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('a.md', 'one\n')
+      await pass(repo, { publish: false })
+      await repo.write('b.md', 'two\n')
+      await repo.run(['add', 'b.md'])
+      await repo.run(['commit', '-qm', 'My own commit'])
+      await repo.write('c.md', 'three\n')
+      await pass(repo, { publish: false })
+
+      await pass(repo)
+      const b = await otherComputer(remote)
+      expect(await log(b, '-3')).toEqual(['sync (Mac-A): c.md', 'My own commit', 'sync (Mac-A): a.md'])
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
 })

@@ -4,7 +4,7 @@ import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, Too
 import { findGit, git } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { ghCli, type GitHub, type RepoPolicy } from './github'
-import { CLEAN, commitPending, countAhead, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { CLEAN, commitPending, countAhead, foldOwnCommits, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import { exchangeViaPr } from './pullRequest'
 
 /**
@@ -44,7 +44,7 @@ export interface PassOptions {
   github?: GitHub
   /** The repo's rules as last read (the manager keeps them); unknown → this pass reads them (D22). */
   policy?: RepoPolicy | null
-  /** False on quiet passes: in PR mode they may land a merged batch and receive, never send (D24). */
+  /** False on quiet passes: they commit here and receive, never send — in PR mode (D24) and push mode (D40). */
   publish?: boolean
 }
 
@@ -182,8 +182,11 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
     ahead = await countAhead(bin, root)
   }
 
-  // ---------- 4. publish ----------
+  // ---------- 4. publish (never on a quiet pass, D40) ----------
+  if (ahead > 0 && opts.publish === false) return { ...CLEAN, fetched: !flush, tooBig }
   if (ahead > 0) {
+    // D41: AutoSync's own commits since the last push go as one.
+    if (hasUpstream && (await foldOwnCommits(bin, root, opts.host)) === 0) return { ...CLEAN, fetched: !flush, level: !flush, tooBig }
     opts.onDirection?.('up')
     const pushed = await git(bin, root, hasUpstream ? ['push'] : ['push', '-u', 'origin', 'HEAD'], { timeoutMs: flush ? FLUSH_PUSH_TIMEOUT_MS : TRANSFER_TIMEOUT_MS })
     if (pushed.code !== 0 && mayRetry && !flush && PUSH_RACED.test(pushed.stderr)) return exchange(bin, root, tooBig, opts, false)

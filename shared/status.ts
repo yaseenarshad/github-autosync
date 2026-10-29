@@ -13,8 +13,14 @@ export const DEBOUNCE_MS = 30_000
 export const PR_QUIET_MS = 5 * 60_000
 /** While a batch's PR is open, how often a quiet pass checks whether it merged. */
 export const PR_CHECK_MS = 15_000
-/** A folder that ended level pulls again this often. */
+/** A folder that ended level pulls again this often (the default pull, D39). */
 export const POLL_MS = 60_000
+/** The unit of the per-repo push and pull settings (D37, D39). */
+export const MINUTE_MS = 60_000
+/** D38: Auto never waits longer than this after the first unsent change… */
+export const AUTO_CAP_MS = 5 * MINUTE_MS
+/** …nor, in PR mode, longer than this. */
+export const PR_CAP_MS = 30 * MINUTE_MS
 /** After an offline pass, the one quiet retry. */
 export const OFFLINE_RETRY_MS = 120_000
 /** Wake/unlock pulls, but not again within this of the last pass. */
@@ -43,6 +49,9 @@ export const PULL_CHOICES: readonly PullEvery[] = [1, 5, 15, 60, 'manual']
 export const minutesLabel = (m: number): string => (m % 60 === 0 ? plural(m / 60, 'hour') : `${m} min`)
 
 export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after you stop editing)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
+/** D52: the pull in a sentence — "checks GitHub every minute". */
+export const checksEvery = (p: PullEvery): string => (p === 'manual' ? 'only when you press Sync now' : p === 1 ? 'every minute' : `every ${minutesLabel(p)}`)
+
 export const pullLabel = (p: PullEvery): string => (p === 'manual' ? 'By hand only' : p === 1 ? 'Every minute' : `Every ${minutesLabel(p)}`)
 
 // ---------- links ----------

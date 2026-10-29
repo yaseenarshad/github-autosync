@@ -135,6 +135,26 @@ export async function rebaseKeepingBoth(bin: string, root: string, host: string,
   }
 }
 
+/**
+ * D41: AutoSync's own unpushed commits become one before a push — pulls commit here (D40), and a
+ * push every hour would otherwise send each of them. Only when EVERY unpushed commit is
+ * `sync (<this host>)`: a commit the user made by hand is never rewritten, and nothing pushed is.
+ * `reset --soft` leaves the index and the tree as they are, so the one commit holds exactly the
+ * same files. Answers how many commits are left to push.
+ */
+export async function foldOwnCommits(bin: string, root: string, host: string): Promise<number> {
+  const subjects = (await git(bin, root, ['log', '--format=%s', '@{u}..HEAD'])).stdout.split('\n').filter((l) => l !== '')
+  const own = (subject: string) => subject === `sync (${host})` || subject.startsWith(`sync (${host}):`)
+  if (subjects.length < 2 || !subjects.every(own)) return subjects.length
+  const files = zList(await git(bin, root, ['diff', '--name-only', '-z', '@{u}', 'HEAD']))
+  const reset = await git(bin, root, ['reset', '--soft', '@{u}'])
+  if (reset.code !== 0) return subjects.length
+  // The commits cancelled out: nothing is left to send.
+  if (files.length === 0) return 0
+  const committed = await git(bin, root, ['commit', '-m', commitMessage(host, files)])
+  return committed.code === 0 ? 1 : 0
+}
+
 /** Our commits GitHub does not have yet. Asked after a rebase, which may have committed a late save (D30). */
 export const countAhead = async (bin: string, root: string): Promise<number> => Number.parseInt((await git(bin, root, ['rev-list', '--count', '@{u}..HEAD'])).stdout, 10) || 0
 

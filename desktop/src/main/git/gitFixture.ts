@@ -170,7 +170,7 @@ export function gitHost(host: string, over: Partial<SyncHost> = {}): SyncHost {
     onChange: () => undefined,
     quietMs: never,
     retryMs: never,
-    pollMs: never,
+    minuteMs: never,
     wakeCooldownMs: never,
     peekMs: never,
     ...over,

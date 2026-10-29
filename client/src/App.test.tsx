@@ -6,6 +6,7 @@ import type { ActivityPage, AppStatus, FolderVerdict, NavTarget } from '@shared/
 import { App } from './App'
 import { platform } from './lib/platform'
 import { makeEntry, makeFolder, makeStatus } from '@shared/testFixtures'
+import { clock } from '@shared/status'
 
 let root: Root
 let container: HTMLElement
@@ -328,6 +329,17 @@ describe('folder page wording', () => {
   it('pending, with the send counting down', async () => {
     await show({ state: 'pending', pending: [change, change], sendAt: at + 23_000 })
     expect(text('.status .s')).toBe('Sends in 0:23 — 30s after you stop editing.')
+  })
+
+  it('a timer repo says when it sends and when it next checks, and offers Push now (D52)', async () => {
+    await show({ state: 'pending', pending: [change], sendAt: at + 42 * 60_000 + 10_000, pullAt: at + 192_000, settings: { push: 60, pull: 5, paths: null, beforePush: null } })
+    expect(text('.status .s')).toBe(`Sends at ${clock(at + 42 * 60_000 + 10_000)} (in 42:10) · next check in 3:12`)
+    expect(button('Push now')).toBeTruthy()
+  })
+
+  it('a repo pushed by hand says so', async () => {
+    await show({ state: 'pending', pending: [change], pullAt: at + 60_000, settings: { push: 'manual', pull: 1, paths: null, beforePush: null } })
+    expect(text('.status .s')).toBe('You push this repo by hand — press Push now to send · next check in 1:00')
   })
 
   it('a pull-request folder counts down to opening its PR (D24)', async () => {

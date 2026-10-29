@@ -59,7 +59,7 @@ describe('5B: failure proofs', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
       args[0] === 'fetch' ? { code: 128, stdout: '', stderr: "remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/me/notes.git/'" } : real(bin, root, args, opts),
     )
     try {
-      const { status } = await start(r.root, { pollMs: 10, retryMs: 10 })
+      const { status } = await start(r.root, { minuteMs: 10, retryMs: 10 })
       expect(status()).toMatchObject({ state: 'attention', attention: { kind: 'auth', detail: "fatal: Authentication failed for 'https://github.com/me/notes.git/'" }, retryAt: null })
       const fetches = callsIn(r.root).filter(([, , args]) => args[0] === 'fetch').length
       await new Promise((resolve) => setTimeout(resolve, 80))
