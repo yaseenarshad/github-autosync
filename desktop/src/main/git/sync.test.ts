@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
 import { clone, lateSave, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
-import { commitMessage, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
+import { commitMessage, fileList, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
 import { hostName, syncFolder, type PassOptions } from './sync'
 
 // Real git throughout; the spy only records what each call was given.
@@ -62,10 +62,41 @@ async function oversize(repo: GitRepo, name: string, bytes = TOO_BIG_BYTES): Pro
   await truncate(path.join(repo.root, name), bytes)
 }
 
+describe('commit messages name the shared folder and list every file (D50)', () => {
+  it('names the deepest shared folder, two levels at most, and none when the files share none', () => {
+    expect(commitMessage('Mac-A', ['README.md'])).toBe('sync (Mac-A): README.md')
+    expect(commitMessage('Mac-A', ['yaseen/docs/10-28/Work.md', 'yaseen/docs/10-28/Scenarios.excalidraw', 'yaseen/docs/Map.md'])).toBe(
+      'sync (Mac-A): yaseen/docs — Work.md, Scenarios.excalidraw, Map.md',
+    )
+    expect(commitMessage('Mac-A', ['yaseen/docs/a.md', 'smeet/docs/b.md'])).toBe('sync (Mac-A): a.md, b.md')
+    expect(commitMessage('Mac-A', ['docs/a.md', 'top.md'])).toBe('sync (Mac-A): a.md, top.md')
+  })
+
+  it('lists each file in the body, then counts the rest after 50', () => {
+    expect(fileList(['a.md', 'docs/b.md'])).toBe('- a.md\n- docs/b.md')
+    const many = Array.from({ length: 53 }, (_, i) => `f${i}.md`)
+    expect(fileList(many).split('\n')).toHaveLength(51)
+    expect(fileList(many).endsWith('- …and 3 more')).toBe(true)
+  })
+
+  it(
+    'puts the list in the commit body on GitHub',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('docs/a.md', 'a\n')
+      await repo.write('docs/b.md', 'b\n')
+      await pass(repo)
+      const b = await otherComputer(remote)
+      expect(await b.run(['log', '-1', '--format=%s%n%b'])).toBe('sync (Mac-A): docs — a.md, b.md\n- docs/a.md\n- docs/b.md')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
 describe('commitMessage / hostName (D16)', () => {
   it('names up to three basenames after the host, and falls back to a bare subject', () => {
     expect(commitMessage('Mac-A', [])).toBe('sync (Mac-A)')
-    expect(commitMessage('Mac-A', ['notes/deep/one.md'])).toBe('sync (Mac-A): one.md')
+    expect(commitMessage('Mac-A', ['notes/deep/one.md'])).toBe('sync (Mac-A): notes/deep — one.md')
     expect(commitMessage('Mac-A', ['a.md', 'b.md', 'c.md'])).toBe('sync (Mac-A): a.md, b.md, c.md')
     expect(commitMessage('Mac-A', ['a.md', 'b.md', 'c.md', 'd.md', 'e.md'])).toBe('sync (Mac-A): a.md, b.md, c.md +2 more')
   })

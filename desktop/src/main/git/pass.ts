@@ -26,14 +26,47 @@ export const TOO_BIG_BYTES = 95 * 1024 * 1024
 /** How many file names a commit subject lists before it summarises the rest. */
 const SUBJECT_FILES = 3
 
-/** `sync (Mac-A): a.md, b.md, c.md +2 more`, or a bare `sync (Mac-A)`. Basenames — a subject is a glance; the paths are in the diff. */
+/** How deep the folder in a subject goes (D50): `yaseen/docs`, not the folder five levels down. */
+const SUBJECT_FOLDER_DEPTH = 2
+/** How many files a commit or PR body lists; a batch that touched thousands would otherwise hit GitHub's body limit. */
+const BODY_FILES = 50
+
+/** D50: the deepest folder every file is in, at most two levels; '' when they share none. */
+export function commonFolder(files: readonly string[]): string {
+  let common: string[] | null = null
+  for (const f of files) {
+    const dirs = f.split('/').slice(0, -1)
+    if (common === null) common = dirs
+    let i = 0
+    while (i < common.length && i < dirs.length && common[i] === dirs[i]) i += 1
+    common = common.slice(0, i)
+  }
+  return (common ?? []).slice(0, SUBJECT_FOLDER_DEPTH).join('/')
+}
+
+/**
+ * `sync (Mac-A): a.md, b.md, c.md +2 more`, or a bare `sync (Mac-A)`. Basenames — a subject is a
+ * glance — after the folder they share, if any (D50): `sync (Mac-A): yaseen/docs — a.md, b.md`.
+ * The prefix `sync (<host>)` is what Activity reads (`SYNC_SUBJECT`) and what D41 folds.
+ */
 export function commitMessage(host: string, files: readonly string[]): string {
   const names = files.map((f) => path.posix.basename(f)).filter((n) => n !== '')
   if (names.length === 0) return `sync (${host})`
   const rest = names.length - SUBJECT_FILES
-  const head = names.slice(0, SUBJECT_FILES).join(', ')
+  const folder = commonFolder(files)
+  const head = `${folder === '' ? '' : `${folder} — `}${names.slice(0, SUBJECT_FILES).join(', ')}`
   return rest > 0 ? `sync (${host}): ${head} +${rest} more` : `sync (${host}): ${head}`
 }
+
+/** D50: every file, one a line, the rest counted — a commit's body and a PR's (D23). */
+export function fileList(files: readonly string[]): string {
+  const lines = files.slice(0, BODY_FILES).map((f) => `- ${f}`)
+  if (files.length > BODY_FILES) lines.push(`- …and ${files.length - BODY_FILES} more`)
+  return lines.join('\n')
+}
+
+/** `git commit` with the subject and the file list (D50). */
+const commitArgs = (host: string, files: readonly string[]): string[] => ['commit', '-m', commitMessage(host, files), '-m', fileList(files)]
 
 /** The files in `rel` at or over the line. A path that will not stat (deleted) is not. */
 async function oversize(root: string, rel: readonly string[]): Promise<TooBigFile[]> {
@@ -101,7 +134,7 @@ export async function commitPending(bin: string, root: string, host: string, pic
   if (failed !== null) return { failed, tooBig, inUse, committed: false }
   const staged = zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z']))
   if (staged.length === 0) return { failed: null, tooBig, inUse, committed: false }
-  const committed = await git(bin, root, ['commit', '-m', commitMessage(host, staged)])
+  const committed = await git(bin, root, commitArgs(host, staged))
   return { failed: committed.code === 0 ? null : committed, tooBig, inUse, committed: committed.code === 0 }
 }
 
@@ -177,7 +210,7 @@ export async function foldOwnCommits(bin: string, root: string, host: string): P
   if (reset.code !== 0) return subjects.length
   // The commits cancelled out: nothing is left to send.
   if (files.length === 0) return 0
-  const committed = await git(bin, root, ['commit', '-m', commitMessage(host, files)])
+  const committed = await git(bin, root, commitArgs(host, files))
   return committed.code === 0 ? 1 : 0
 }
 
