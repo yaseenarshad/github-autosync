@@ -58,6 +58,8 @@ function attentionBody(attention: Attention): string {
       return 'Its pull request was closed without merging. Syncing is waiting for you.'
     case 'other-app':
       return `Also synced by the ${attention.detail ?? 'other'} app, so AutoSync leaves it alone.`
+    case 'before-push':
+      return 'The command before each push failed. Nothing was pushed.'
     case 'outside-changed': {
       const files = attention.files ?? []
       return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, outside your synced folders. Syncing is waiting for you.`

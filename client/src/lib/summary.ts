@@ -37,6 +37,8 @@ function attentionShort(a: Attention): string {
       return 'Two apps sync this'
     case 'outside-changed':
       return 'Changed on both sides'
+    case 'before-push':
+      return 'Before-push command failed'
     case 'error':
       return 'Sync error'
   }

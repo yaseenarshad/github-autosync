@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, PullEvery, PushEvery, RepoSettings } from '@shared/types'
 import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel } from '@shared/status'
 import { platform } from '../lib/platform'
@@ -37,6 +37,7 @@ export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderSta
             Choose folders…
           </button>
         </Row>
+        <BeforePush folder={f} known={known} save={save} />
         <Row title="Pull" detail="Brings in what your other computers sent. Pulls never push.">
           <select className="select" aria-label="Pull" disabled={!known} value={encode(f.settings.pull)} onChange={(e) => save({ pull: decodePull(e.target.value) })}>
             {PULL_CHOICES.map((p) => (
@@ -48,6 +49,39 @@ export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderSta
         </Row>
       </div>
     </div>
+  )
+}
+
+/** D49: one command, run in the repo root before each push. Saved with Enter or Save; Clear removes it. */
+function BeforePush({ folder: f, known, save }: { folder: FolderStatus; known: boolean; save: (change: Partial<RepoSettings>) => Promise<unknown> }) {
+  const [draft, setDraft] = useState(f.settings.beforePush ?? '')
+  useEffect(() => setDraft(f.settings.beforePush ?? ''), [f.settings.beforePush])
+  const changed = draft.trim() !== (f.settings.beforePush ?? '')
+  const commit = () => save({ beforePush: draft.trim() === '' ? null : draft.trim() })
+  return (
+    <Row title="Before each push" detail="A command run in the repo folder first, for example ./save-for-git.sh. If it fails, nothing is pushed.">
+      <div className="acts">
+        <input
+          className="text-input mono"
+          aria-label="Before each push"
+          placeholder="No command"
+          disabled={!known}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && changed && commit()}
+        />
+        {changed && (
+          <button className="btn blue" onClick={commit}>
+            Save
+          </button>
+        )}
+        {!changed && f.settings.beforePush !== null && (
+          <button className="btn" onClick={() => save({ beforePush: null })}>
+            Clear
+          </button>
+        )}
+      </div>
+    </Row>
   )
 }
 

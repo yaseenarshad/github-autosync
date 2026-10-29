@@ -31,6 +31,7 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     pending: [],
     outside: [],
     tooBig: [],
+    inUse: [],
     ignored: { patterns: ['.DS_Store'], count: 3 },
     alsoSyncedBy: null,
     offline: false,

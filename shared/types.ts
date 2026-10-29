@@ -10,8 +10,9 @@ export type SyncState = 'off' | 'synced' | 'pending' | 'syncing' | 'attention'
  * `no-gh` = the repo needs PRs and `gh` is missing or logged out (D28). `pr-closed` = a human closed the batch's PR (D25).
  * `other-app` = the Docs/Draw app syncs this folder too; AutoSync stands back (D27).
  * `outside-changed` = a file outside the picked folders changed here and on GitHub; the pull waits for the user (D45).
+ * `before-push` = the repo's command before a push failed; nothing was committed or pushed (D49).
  */
-export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'outside-changed' | 'error'
+export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'outside-changed' | 'before-push' | 'error'
 
 /** Repo-relative paths: the original file and the `<name> (conflict <host>, <YYYY-MM-DD>)<ext>` copy beside it. */
 export interface ConflictPair {
@@ -23,7 +24,8 @@ export interface Attention {
   kind: AttentionKind
   /**
    * git's first `fatal:`/`error:` line for `error`/`auth`; `rebase` | `merge` | `detached` | `side-branch` for `busy-repo`;
-   * the PR's URL for `pr-closed`; `Docs` | `Draw` for `other-app`; gh's own words for `no-gh`.
+   * the PR's URL for `pr-closed`; `Docs` | `Draw` for `other-app`; gh's own words for `no-gh`;
+   * the command's last lines for `before-push`.
    */
   detail?: string
   conflicts?: ConflictPair[]
@@ -100,6 +102,8 @@ export interface FolderStatus {
   outside: FileChange[]
   /** Never staged: ≥ 95 MiB (D11). */
   tooBig: TooBigFile[]
+  /** D48: databases held back while open (a `-wal` or `-journal` beside them); never pending. */
+  inUse: string[]
   /** Top-level `.gitignore` patterns and how many files git currently ignores (D10). */
   ignored: { patterns: string[]; count: number }
   /** The Docs/Draw app has its own sync switched on for this folder — AutoSync stands back (D27, `other-app`). */

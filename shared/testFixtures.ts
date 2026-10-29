@@ -23,6 +23,7 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
     pending: [],
     outside: [],
     tooBig: [],
+    inUse: [],
     ignored: { patterns: [], count: 0 },
     alsoSyncedBy: null,
     offline: false,

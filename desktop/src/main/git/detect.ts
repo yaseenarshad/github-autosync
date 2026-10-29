@@ -80,6 +80,13 @@ export async function readPending(bin: string, root: string): Promise<FileChange
   return [...out].map(([p, status]) => ({ status, path: p }))
 }
 
+/**
+ * D48: databases that are open right now. SQLite keeps `<name>-wal` or `<name>-journal` beside a
+ * database while it is in use, and the new data lives there: the file alone is old data.
+ */
+export const inUseOf = (root: string, rels: readonly string[]): string[] =>
+  rels.filter((rel) => existsSync(path.join(root, `${rel}-wal`)) || existsSync(path.join(root, `${rel}-journal`)))
+
 /** The working tree's changes alone (staged or not, tracked or new), one entry per file. */
 export async function readWorking(bin: string, root: string): Promise<FileChange[]> {
   const out: FileChange[] = []

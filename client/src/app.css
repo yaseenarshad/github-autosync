@@ -399,6 +399,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
 .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(33, 136, 255, .25); }
 .select:disabled { opacity: .55; }
 .set .acts, .action .acts { display: flex; gap: 6px; flex: none; }
+.action .acts .text-input { width: 240px; }
 .d.warn { color: var(--warn); }
 .radio { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
 .tree { border: 1px solid var(--soft-border); border-radius: 8px; padding: 6px 8px; margin: 8px 0; max-height: 280px; overflow: auto; }

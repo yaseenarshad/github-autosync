@@ -320,6 +320,18 @@ describe('sync settings (D34, D35)', () => {
     expect(api.pushOutside).toHaveBeenCalledWith('notes')
   })
 
+  it('saves the command before each push with Enter, and Clear removes it (D49)', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Before each push"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, ' ./save-for-git.sh ')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 1, paths: null, beforePush: './save-for-git.sh' })
+  })
+
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
     const api = await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/Sync/autosync' }))
     api.pickSettingsFolder.mockResolvedValue('/Users/yasin/Sync/other')

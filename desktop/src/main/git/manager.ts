@@ -146,6 +146,7 @@ interface Entry {
   outsideOnce: boolean
   pendingSince: number | null
   tooBig: TooBigFile[]
+  inUse: string[]
   ignored: { patterns: string[]; count: number }
   alsoSyncedBy: OtherApp | null
   lastSyncedAt: number | null
@@ -196,6 +197,7 @@ function fresh(cfg: FolderConfig): Entry {
     outsideOnce: false,
     pendingSince: null,
     tooBig: [],
+    inUse: [],
     ignored: { patterns: [], count: 0 },
     alsoSyncedBy: null,
     lastSyncedAt: null,
@@ -238,6 +240,7 @@ function toStatus(e: Entry): FolderStatus {
     pending: e.pending,
     outside: e.outside,
     tooBig: e.tooBig,
+    inUse: e.inUse,
     ignored: e.ignored,
     alsoSyncedBy: e.alsoSyncedBy,
     offline: e.active && e.offline,
@@ -278,6 +281,7 @@ function apply(e: Entry, res: PassResult): void {
     e.branch = res.facts.branch
     e.remoteUrl = res.facts.remoteUrl
     e.ignored = res.facts.ignored
+    e.inUse = res.facts.inUse
     setPending(e, res.facts.pending)
   }
   if (res.fetched) e.lastCheckedAt = now

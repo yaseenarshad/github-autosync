@@ -138,6 +138,35 @@ export function git(bin: string, root: string, args: string[], opts: { timeoutMs
   })
 }
 
+/** D49: the limit on a before-push command. */
+export const COMMAND_TIMEOUT_MS = 120_000
+/** How many of a failed command's last lines the card shows (D49). */
+const COMMAND_TAIL_LINES = 20
+
+/**
+ * D49: the repo's own command before a send, in the repo root. On macOS through the user's login
+ * shell, so it finds what their terminal finds (an app opened from Finder has a bare PATH);
+ * on Windows through `cmd.exe`. Never throws: null when it exited 0, else its last lines (output and
+ * errors together) and why it stopped.
+ */
+export function runCommand(command: string, root: string, timeoutMs = COMMAND_TIMEOUT_MS): Promise<string | null> {
+  const windows = process.platform === 'win32'
+  const file = windows ? 'cmd.exe' : (process.env.SHELL ?? '/bin/sh')
+  const args = windows ? ['/d', '/s', '/c', `"${command}"`] : ['-l', '-c', command]
+  return new Promise((resolve) => {
+    execFile(file, args, { cwd: root, timeout: timeoutMs, maxBuffer: MAX_BUFFER, windowsHide: true, windowsVerbatimArguments: windows, encoding: 'utf8' }, (err, stdout, stderr) => {
+      if (err === null) {
+        resolve(null)
+        return
+      }
+      const code: unknown = (err as NodeJS.ErrnoException).code
+      const why = typeof code === 'number' ? `exit code ${code}` : code === null || code === undefined ? `stopped after ${timeoutMs / 1000} s` : err.message
+      const lines = `${stdout}${stderr}`.trimEnd().split(/\r?\n/).filter((l) => l !== '').slice(-COMMAND_TAIL_LINES)
+      resolve([...lines, `(${why})`].join('\n'))
+    })
+  })
+}
+
 /** One `-z` listing as paths; a failed listing is an empty one. */
 export const zList = (res: GitResult): string[] => (res.code === 0 ? res.stdout.split('\0').filter((p) => p !== '') : [])
 

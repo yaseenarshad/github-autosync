@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { inPicks, type Picks } from '@shared/status'
 import type { TooBigFile } from '@shared/types'
-import { readWorking, repoState } from './detect'
+import { inUseOf, readWorking, repoState } from './detect'
 import { classifyGitFailure, firstMeaningfulLine, git, zList, type GitResult } from './exec'
 import type { GhFailure } from './github'
 import { resolveRebase } from './resolve'
@@ -73,33 +73,36 @@ const STAGE_TRIES = 3
  *  - AFTER, anything staged over the line is unstaged — the belt for a file that grew in between.
  * OUT OF SCOPE: a file already COMMITTED over the limit; the push keeps failing (`error`).
  */
-async function stageWithinLimit(bin: string, root: string, picks: Picks): Promise<{ failed: GitResult | null; tooBig: TooBigFile[] }> {
+async function stageWithinLimit(bin: string, root: string, picks: Picks): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; inUse: string[] }> {
   // D44: nothing outside the picks is ever staged.
   const scope = await scopeOf(bin, root, picks)
-  if (scope.length === 0) return { failed: null, tooBig: [] }
+  if (scope.length === 0) return { failed: null, tooBig: [], inUse: [] }
   const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...scope]))
   const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified', '--', ...scope]))
-  const held = await oversize(root, [...new Set([...untracked, ...modified])])
-  const add = ['add', '-A', '--', ...scope, ...held.map((f) => `:(exclude,literal)${f.path}`)]
+  const candidates = [...new Set([...untracked, ...modified])]
+  const held = await oversize(root, candidates)
+  // D48: an open database waits until its side file is gone.
+  const inUse = inUseOf(root, candidates)
+  const add = ['add', '-A', '--', ...scope, ...[...held.map((f) => f.path), ...inUse].map((p) => `:(exclude,literal)${p}`)]
   let staged = await git(bin, root, add)
   // A file being written while git reads it fails the whole add ("short read") and stages nothing. So a
   // refusal is asked again, whatever it said; a timeout (a negative code) is not.
   for (let left = STAGE_TRIES - 1; staged.code > 0 && left > 0; left -= 1) staged = await git(bin, root, add)
-  if (staged.code !== 0) return { failed: staged, tooBig: held }
+  if (staged.code !== 0) return { failed: staged, tooBig: held, inUse }
   const late = await oversize(root, zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z'])))
   if (late.length > 0) await git(bin, root, ['reset', '-q', '--', ...late.map((f) => `:(literal)${f.path}`)])
   const all = new Map([...held, ...late].map((f) => [f.path, f]))
-  return { failed: null, tooBig: [...all.values()].sort((a, b) => a.path.localeCompare(b.path)) }
+  return { failed: null, tooBig: [...all.values()].sort((a, b) => a.path.localeCompare(b.path)), inUse }
 }
 
 /** Local edits become one commit, minus anything GitHub would refuse (D11). `committed`: there was something to commit, and it is. */
-export async function commitPending(bin: string, root: string, host: string, picks: Picks = null): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; committed: boolean }> {
-  const { failed, tooBig } = await stageWithinLimit(bin, root, picks)
-  if (failed !== null) return { failed, tooBig, committed: false }
+export async function commitPending(bin: string, root: string, host: string, picks: Picks = null): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; inUse: string[]; committed: boolean }> {
+  const { failed, tooBig, inUse } = await stageWithinLimit(bin, root, picks)
+  if (failed !== null) return { failed, tooBig, inUse, committed: false }
   const staged = zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z']))
-  if (staged.length === 0) return { failed: null, tooBig, committed: false }
+  if (staged.length === 0) return { failed: null, tooBig, inUse, committed: false }
   const committed = await git(bin, root, ['commit', '-m', commitMessage(host, staged)])
-  return { failed: committed.code === 0 ? null : committed, tooBig, committed: committed.code === 0 }
+  return { failed: committed.code === 0 ? null : committed, tooBig, inUse, committed: committed.code === 0 }
 }
 
 export type Verdict = Pick<PassResult, 'attention' | 'offline' | 'fetched' | 'level' | 'tooBig' | 'policy' | 'pr'>
@@ -145,9 +148,9 @@ export async function rebaseKeepingBoth(bin: string, root: string, host: string,
     const late = await commitPending(bin, root, host, picks)
     if (late.failed !== null) return fromFailure(late.failed, late.tooBig, true)
     if (left === 0) return failed !== null && !late.committed ? fromFailure(failed, late.tooBig, true) : { ...CLEAN, fetched: true, tooBig: late.tooBig }
-    // Held back: too big (D11), and what changed outside the picks (D45) — `rebase` refuses a tree with either.
+    // Held back: too big (D11), open databases (D48), and what changed outside the picks (D45) — `rebase` refuses a tree with any.
     const outside = (await readWorking(bin, root)).filter((c) => !inPicks(picks, c.path)).map((c) => c.path)
-    failed = await parkWhileRebasing(bin, root, [...late.tooBig.map((f) => f.path), ...outside], async () => {
+    failed = await parkWhileRebasing(bin, root, [...late.tooBig.map((f) => f.path), ...late.inUse, ...outside], async () => {
       const rebased = await git(bin, root, ['rebase', ...args])
       if (rebased.code === 0) return null
       // Refused before it began (a save under it): nothing to settle or abort, and the save stays as it is on disk.

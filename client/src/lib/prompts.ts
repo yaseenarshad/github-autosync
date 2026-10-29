@@ -83,6 +83,13 @@ export function attentionPrompt(f: FolderStatus, a: Attention): string {
         "Don't change any files or git settings yourself."
       )
     }
+    case 'before-push':
+      return (
+        `In ${where(f)}, GitHub AutoSync runs this command before each push: ${f.settings.beforePush ?? ''}\n` +
+        'It failed, so AutoSync committed and pushed nothing. Its last lines:\n' +
+        `${a.detail ?? ''}\n\n` +
+        `Find out why it fails when run in ${f.path} and fix it, without losing any changes. Then run it again to confirm it exits 0.`
+      )
     case 'outside-changed':
       return (
         `In ${where(f)}, GitHub AutoSync syncs only these folders: ${(f.settings.paths ?? []).join(', ')}. ` +

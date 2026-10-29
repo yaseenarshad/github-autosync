@@ -1,8 +1,8 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts, other-app refusal and the PR route (D22–D29; shared helpers moved to pass.ts).
 import os from 'node:os'
 import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, RepoSettings, TooBigFile } from '@shared/types'
-import { findGit, git } from './exec'
-import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
+import { findGit, git, runCommand } from './exec'
+import { inUseOf, isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { ghCli, type GitHub, type RepoPolicy } from './github'
 import { CLEAN, commitPending, countAhead, foldOwnCommits, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import { exchangeViaPr } from './pullRequest'
@@ -55,6 +55,8 @@ interface Facts {
   branch: string | null
   remoteUrl: string | null
   pending: FileChange[]
+  /** D48: open databases, held back: not in `pending`. */
+  inUse: string[]
   ignored: { patterns: string[]; count: number }
   conflicts: ConflictPair[]
 }
@@ -93,10 +95,12 @@ export async function syncFolder(root: string, opts: PassOptions): Promise<PassR
 }
 
 async function readFacts(bin: string, root: string, repo: RepoState): Promise<Facts> {
+  const { pending, inUse } = await pendingAndInUse(bin, root)
   return {
     branch: repo.branch,
     remoteUrl: repo.remoteUrl,
-    pending: await readPending(bin, root),
+    pending,
+    inUse,
     ignored: await readIgnored(bin, root),
     conflicts: await readConflicts(bin, root),
   }
@@ -122,6 +126,13 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
   }
   // D29: a side branch of a PR-rule repo is someone's work in progress — zero writes.
   if (policy?.requiresPr === true && repo.branch !== policy.defaultBranch) return { ...CLEAN, attention: SIDE_BRANCH, policy }
+
+  // ---------- 0. the repo's own command before a send (D49), so what it writes goes in the commit ----------
+  const command = opts.settings?.beforePush ?? null
+  if (command !== null && opts.publish !== false && opts.flush !== true) {
+    const stopped = await runCommand(command, root)
+    if (stopped !== null) return { ...CLEAN, attention: { kind: 'before-push', detail: stopped }, policy }
+  }
 
   // ---------- 1. local edits become one commit (minus anything GitHub would refuse — D11) ----------
   const { failed, tooBig } = await commitPending(bin, root, opts.host, opts.settings?.paths ?? null)
@@ -198,9 +209,16 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
   return { ...CLEAN, fetched: !flush, level: !flush, tooBig }
 }
 
+/** D48: the pending list without the open databases, and those apart. */
+async function pendingAndInUse(bin: string, root: string): Promise<{ pending: FileChange[]; inUse: string[] }> {
+  const all = await readPending(bin, root)
+  const inUse = inUseOf(root, all.map((c) => c.path))
+  return { pending: all.filter((c) => !inUse.includes(c.path)), inUse }
+}
+
 /** The pending list alone, for the manager's look between passes; null when git cannot read the folder. */
 export async function peekPending(root: string, candidates?: readonly string[]): Promise<FileChange[] | null> {
   const bin = await findGit(candidates)
   if (bin === null || !isRepoRoot(root)) return null
-  return readPending(bin, root)
+  return (await pendingAndInUse(bin, root)).pending
 }

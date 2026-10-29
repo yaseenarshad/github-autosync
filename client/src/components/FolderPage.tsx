@@ -205,7 +205,7 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
   }
 }
 
-function problemText(a: Attention): { title: string; body: string } {
+function problemText(f: FolderStatus, a: Attention): { title: string; body: string } {
   switch (a.kind) {
     case 'conflict': {
       const n = a.conflicts?.length ?? 0
@@ -257,6 +257,11 @@ function problemText(a: Attention): { title: string; body: string } {
         body: `One folder, one syncer: AutoSync is standing back and changing nothing until one of them is off. Turn off GitHub sync for this folder in the ${app} app, or turn this folder off here.`,
       }
     }
+    case 'before-push':
+      return {
+        title: 'The command before each push failed',
+        body: `AutoSync runs “${f.settings.beforePush ?? ''}” before it pushes this folder. It stopped with an error, so nothing was committed or pushed. Your changes are safe on ${platform.here}.`,
+      }
     case 'outside-changed': {
       const n = a.files?.length ?? 0
       return {
@@ -275,7 +280,7 @@ function problemText(a: Attention): { title: string; body: string } {
 }
 
 function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attention: Attention }) {
-  const { title, body } = problemText(a)
+  const { title, body } = problemText(f, a)
   const prompt = attentionPrompt(f, a)
   return (
     <div className="card">
@@ -294,7 +299,7 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
           ))}
         </ul>
       )}
-      {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh') && a.detail && <div className="prompt">{a.detail}</div>}
+      {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh' || a.kind === 'before-push') && a.detail && <div className="prompt">{a.detail}</div>}
       {a.kind === 'outside-changed' && (
         <ul className="pairs">
           {a.files?.map((p) => (
@@ -377,7 +382,7 @@ function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus
                 ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
                 : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
-  const count = f.pending.length + f.outside.length + f.tooBig.length + (ignored ? 1 : 0)
+  const count = f.pending.length + f.outside.length + f.inUse.length + f.tooBig.length + (ignored ? 1 : 0)
 
   return (
     <div className="section">
@@ -411,6 +416,15 @@ function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus
             </button>
           </div>
         )}
+        {f.inUse.map((p) => (
+          <div className="tr" key={p}>
+            <span className="st muted" title="In use">
+              ⏸
+            </span>
+            <span className="f">{p}</span>
+            <span className="m">In use — database open</span>
+          </div>
+        ))}
         {f.tooBig.map((t) => (
           <div className="tr" key={t.path}>
             <span className="st D" title="Skipped">

@@ -34,7 +34,7 @@ function result(over: Partial<PassResult> = {}, pending: FileChange[] = []): Pas
     level: true,
     tooBig: [],
     alsoSyncedBy: null,
-    facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, ignored: { patterns: [], count: 0 }, conflicts: [] },
+    facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, inUse: [], ignored: { patterns: [], count: 0 }, conflicts: [] },
     policy: null,
     pr: null,
     ...over,
@@ -504,7 +504,7 @@ describe('PR mode (D22, D24, D26)', () => {
   })
 
   it('is push mode on any branch but the one the rules govern', async () => {
-    const h = harness({ pass: async () => result({ policy: RULES, facts: { branch: 'dev', remoteUrl: null, pending: [], ignored: { patterns: [], count: 0 }, conflicts: [] } }) })
+    const h = harness({ pass: async () => result({ policy: RULES, facts: { branch: 'dev', remoteUrl: null, pending: [], inUse: [], ignored: { patterns: [], count: 0 }, conflicts: [] } }) })
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
     expect(h.status().publishVia).toBe('push')

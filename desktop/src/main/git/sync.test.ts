@@ -759,3 +759,61 @@ describe('picked folders (D44, D45)', () => {
     REAL_GIT_TIMEOUT_MS,
   )
 })
+
+describe('open databases and the command before a push (D48, D49)', () => {
+  const withCommand = (beforePush: string) => ({ settings: { push: 'auto' as const, pull: 1 as const, paths: null, beforePush } })
+
+  it(
+    'holds a database back while its -wal is beside it, and sends it once the -wal is gone',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('.gitignore', '*.db-wal\n')
+      await repo.write('data/lab.db', 'old pages\n')
+      await repo.write('data/lab.db-wal', 'new pages\n')
+      await repo.write('note.md', 'edit\n')
+
+      const res = await pass(repo)
+      expect(res).toMatchObject({ attention: null, level: true, facts: { inUse: ['data/lab.db'] } })
+      expect(res.facts?.pending.map((c) => c.path)).not.toContain('data/lab.db')
+      const b = await otherComputer(remote)
+      expect(existsSync(path.join(b.root, 'data/lab.db'))).toBe(false)
+      expect(await b.read('note.md')).toBe('edit\n')
+
+      await unlink(path.join(repo.root, 'data/lab.db-wal'))
+      expect(await pass(repo)).toMatchObject({ level: true, facts: { inUse: [] } })
+      await b.run(['pull', '-q'])
+      expect(await b.read('data/lab.db')).toBe('old pages\n')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a command that fails stops the pass with its output; nothing is committed or pushed',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const head = await repo.run(['rev-parse', 'HEAD'])
+      await repo.write('note.md', 'edit\n')
+      const res = await pass(repo, withCommand('echo checking keys && echo found a key 1>&2 && exit 3'))
+      expect(res.attention?.kind).toBe('before-push')
+      expect(res.attention?.detail).toMatch(/checking keys[\s\S]*found a key[\s\S]*exit code 3/)
+      expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+      expect(await remoteHead(repo, remote)).toBe(head)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a command that writes a file puts it in the same push; a pull never runs it',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('note.md', 'edit\n')
+      await pass(repo, { ...withCommand('echo folded > folded.txt'), publish: false })
+      expect(existsSync(path.join(repo.root, 'folded.txt'))).toBe(false)
+      expect(await pass(repo, withCommand('echo folded > folded.txt'))).toMatchObject({ attention: null, level: true })
+      const b = await otherComputer(remote)
+      expect((await b.read('folded.txt')).trim()).toBe('folded')
+      expect(await b.run(['log', '-1', '--format=%s'])).toMatch(/^sync \(Mac-A\): /)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
