@@ -35,10 +35,14 @@ export function folder(name, dir, extra = {}) {
     branch: 'main',
     remoteUrl: `${ORG}/${name}.git`,
     webUrl: `${ORG}/${name}`,
+    repo: `${ORG}/${name}`.replace(/^https:\/\//, '').toLowerCase(),
+    settings: { push: 'auto', pull: 1, paths: null, beforePush: null },
     publishVia: 'push',
     pr: null,
     pending: [],
+    outside: [],
     tooBig: [],
+    inUse: [],
     ignored: { patterns: ['.DS_Store', '.obsidian/workspace.json'], count: 4 },
     alsoSyncedBy: null,
     offline: false,
@@ -47,6 +51,8 @@ export function folder(name, dir, extra = {}) {
     pendingSince: null,
     sendAt: null,
     retryAt: null,
+    pullAt: NOW + 40 * SEC,
+    pausedUntil: null,
     ...extra,
   }
 }
@@ -68,7 +74,20 @@ export function folders() {
 }
 
 export function status(list = folders()) {
-  return { folders: list, paused: false, gitMissing: false, hostname: HOST, launchAtLogin: true, theme: 'light' }
+  return {
+    folders: list,
+    paused: false,
+    gitMissing: false,
+    hostname: HOST,
+    launchAtLogin: true,
+    theme: 'light',
+    settingsFolder: '/Users/sam/Documents/GitHub/sam-os/Sync/github-autosync-settings',
+    settingsFolderMissing: false,
+    settingsFolderNote: null,
+    others: [],
+    computers: [],
+    defaults: { push: 'auto', pull: 1 },
+  }
 }
 
 /** `list` with the folder `id` changed by `change`. */

@@ -91,5 +91,15 @@ window.autosync = {
   setAlias: (id, alias) => patch(id, { alias, name: alias ?? id }),
   openInTerminal: (id) => record('openInTerminal', id),
   openInEditor: (id) => record('openInEditor', id),
+  setRepoSettings: (id, settings) => patch(id, { settings }),
+  pickSettingsFolder: () => Promise.resolve(null),
+  setSettingsFolder: (settingsFolder) => set({ ...status, settingsFolder }),
+  listFolders: () => Promise.resolve([]),
+  pushOutside: (id) => record('pushOutside', id),
+  pauseFolder: (id, minutes) => record('pauseFolder', id, minutes).then(() => status),
+  addOther: (key) => record('addOther', key).then(() => ({ ok: true, path: key, warning: null, offline: false })),
+  cloneOther: (key) => record('cloneOther', key),
+  hideOther: (key) => record('hideOther', key).then(() => status),
+  setDefaults: (defaults) => set({ ...status, defaults }),
 }
 window.__demoAsked = asked
