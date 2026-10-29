@@ -54,6 +54,12 @@ export const checksEvery = (p: PullEvery): string => (p === 'manual' ? 'only whe
 
 export const pullLabel = (p: PullEvery): string => (p === 'manual' ? 'By hand only' : p === 1 ? 'Every minute' : `Every ${minutesLabel(p)}`)
 
+/** D44: the folders a commit may take; null is the whole repo. */
+export type Picks = readonly string[] | null
+
+/** D44: a repo-relative path inside the picks (a picked folder covers everything below it). */
+export const inPicks = (picks: Picks, rel: string): boolean => picks === null || picks.some((p) => rel === p || rel.startsWith(`${p}/`))
+
 // ---------- links ----------
 
 /** The one site the app opens in a browser (`openExternal`) — so also the only URLs the window renders as links. */

@@ -6,10 +6,11 @@ import { isGitHubUrl } from '@shared/status'
 import type { AppStatus, NavTarget } from '@shared/types'
 import { channel, type Invokable } from '../channels'
 import { folderMenuTemplate } from './folderMenu'
-import { checkFolder } from './git/detect'
+import { checkFolder, listSubfolders } from './git/detect'
+import { findGit } from './git/exec'
 import { readActivity } from './git/activity'
 import type { SyncManager } from './git/manager'
-import { newFolder, withAlias, withRepoSettings, type Config, type Registry } from './registry'
+import { isRepoPath, newFolder, withAlias, withRepoSettings, type Config, type Registry } from './registry'
 
 /**
  * `shared/api.ts`, implemented. Mutations go through the registry, then `apply` hands the new
@@ -96,6 +97,13 @@ export function registerIpc(deps: IpcDeps): void {
       return picked.canceled ? null : (picked.filePaths[0] ?? null)
     },
     setSettingsFolder: async (path) => change((c) => ({ ...c, settingsFolder: path })),
+    listFolders: async (id, rel) => {
+      if (rel !== '' && !isRepoPath(rel)) throw new Error(`Not a folder in the repo: ${rel}`)
+      const bin = await findGit()
+      if (bin === null) throw new Error('git not found')
+      return listSubfolders(bin, folderPath(id), rel)
+    },
+    pushOutside: (id) => manager.pushOutside(id),
     showInFinder: async (id) => {
       const failure = await shell.openPath(folderPath(id))
       if (failure !== '') throw new Error(failure)

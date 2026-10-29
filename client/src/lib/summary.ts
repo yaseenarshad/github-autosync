@@ -35,6 +35,8 @@ function attentionShort(a: Attention): string {
       return 'PR closed · not merged'
     case 'other-app':
       return 'Two apps sync this'
+    case 'outside-changed':
+      return 'Changed on both sides'
     case 'error':
       return 'Sync error'
   }

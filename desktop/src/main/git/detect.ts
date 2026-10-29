@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/detect.ts; changes: rewritten around AutoSync's reads (busy repo, pending, ignored, conflict copies, web URL, Docs/Draw marker, add-folder check).
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ConflictPair, FileChange, FileStatus, FolderVerdict, OtherApp } from '@shared/types'
 import { classifyGitFailure, findGit, git, zList } from './exec'
@@ -72,19 +72,40 @@ export function parseNameStatus(tokens: readonly string[]): FileChange[] {
  * path both mention — it is what the user did last.
  */
 export async function readPending(bin: string, root: string): Promise<FileChange[]> {
-  const out = new Map<string, FileStatus>()
-  const tokens = zList(await git(bin, root, ['status', '--porcelain', '-z', '-uall']))
-  for (let i = 0; i < tokens.length; i += 1) {
-    const entry = tokens[i] ?? ''
-    const xy = entry.slice(0, 2)
-    out.set(entry.slice(3), porcelainStatus(xy))
-    if (xy.includes('R') || xy.includes('C')) i += 1 // `-z` puts the rename's old path in the next token
-  }
+  const out = new Map<string, FileStatus>((await readWorking(bin, root)).map((c) => [c.path, c.status]))
   // Fails without an upstream (never pushed): then there is nothing to compare against.
   for (const change of parseNameStatus(zList(await git(bin, root, ['diff', '--name-status', '-z', '@{u}..HEAD'])))) {
     if (!out.has(change.path)) out.set(change.path, change.status)
   }
   return [...out].map(([p, status]) => ({ status, path: p }))
+}
+
+/** The working tree's changes alone (staged or not, tracked or new), one entry per file. */
+export async function readWorking(bin: string, root: string): Promise<FileChange[]> {
+  const out: FileChange[] = []
+  const tokens = zList(await git(bin, root, ['status', '--porcelain', '-z', '-uall']))
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i] ?? ''
+    const xy = entry.slice(0, 2)
+    out.push({ status: porcelainStatus(xy), path: entry.slice(3) })
+    if (xy.includes('R') || xy.includes('C')) i += 1 // `-z` puts the rename's old path in the next token
+  }
+  return out
+}
+
+/**
+ * D44: the folder picker, one level at a time — the folders right under `rel` (`''` is the top),
+ * without `.git` and without what git ignores, sorted. Repo-relative, `/`-separated.
+ */
+export async function listSubfolders(bin: string, root: string, rel: string): Promise<string[]> {
+  const entries = await readdir(rel === '' ? root : path.join(root, ...rel.split('/')), { withFileTypes: true })
+  const dirs = entries.filter((d) => d.isDirectory() && d.name !== '.git').map((d) => (rel === '' ? d.name : `${rel}/${d.name}`))
+  if (dirs.length === 0) return []
+  // git sees these are folders, so a folder-only pattern (`node_modules/`) matches. Exit 1 just means
+  // none is ignored. (`-z` needs `--stdin`, which `git()` does not feed; a folder name has no newline.)
+  const res = await git(bin, root, ['-c', 'core.quotePath=false', 'check-ignore', '--', ...dirs])
+  const ignored = new Set(res.code === 0 ? res.stdout.split('\n').filter((l) => l !== '') : [])
+  return dirs.filter((d) => !ignored.has(d)).sort((a, b) => a.localeCompare(b))
 }
 
 /** How many `.gitignore` patterns the UI lists before it stops. */

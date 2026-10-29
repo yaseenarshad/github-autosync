@@ -27,8 +27,8 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-async function pushedRepo(): Promise<{ repo: GitRepo; remote: BareRemote }> {
-  const fixture = await pushedFixture()
+async function pushedRepo(files?: Record<string, string>): Promise<{ repo: GitRepo; remote: BareRemote }> {
+  const fixture = await pushedFixture(files)
   cleanups.push(fixture.cleanup)
   return fixture
 }
@@ -697,6 +697,64 @@ describe('pulls never push; one commit per push (D40, D41)', () => {
       await pass(repo)
       const b = await otherComputer(remote)
       expect(await log(b, '-3')).toEqual(['sync (Mac-A): c.md', 'My own commit', 'sync (Mac-A): a.md'])
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('picked folders (D44, D45)', () => {
+  const docsOnly = { settings: { push: 'auto' as const, pull: 1 as const, paths: ['docs'], beforePush: null } }
+
+  it(
+    'pushes an edit inside the picks and keeps one outside on this computer, also through a pull',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('docs/a.md', 'mine\n')
+      await repo.write('app/db.sqlite', 'live data\n')
+      await repo.write('missing-folder-is-fine.md', 'top\n')
+
+      expect(await pass(repo, { settings: { ...docsOnly.settings, paths: ['docs', 'not/here'] } })).toMatchObject({ attention: null, level: true })
+      const b = await otherComputer(remote)
+      expect(await b.read('docs/a.md')).toBe('mine\n')
+      expect(existsSync(path.join(b.root, 'app/db.sqlite'))).toBe(false)
+
+      // A teammate changes a DIFFERENT file outside the picks: it pulls in, and the local one stays.
+      await pushFrom(b, { 'app/other.txt': 'theirs\n' })
+      expect(await pass(repo, docsOnly)).toMatchObject({ attention: null, level: true })
+      expect(await repo.read('app/other.txt')).toBe('theirs\n')
+      expect(await repo.read('app/db.sqlite')).toBe('live data\n')
+      expect(await repo.run(['status', '--porcelain'])).toContain('app/db.sqlite')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'stops before the pull when a file outside the picks changed here and on GitHub, leaving both versions as they were',
+    async () => {
+      const { repo, remote } = await pushedRepo({ 'note.md': 'base\n', 'app/config.json': '{"v":1}\n' })
+      const b = await otherComputer(remote)
+      await pushFrom(b, { 'app/config.json': '{"v":"theirs"}\n' })
+      await repo.write('app/config.json', '{"v":"mine"}\n')
+      const head = await repo.run(['rev-parse', 'HEAD'])
+
+      const res = await pass(repo, docsOnly)
+      expect(res).toMatchObject({ attention: { kind: 'outside-changed', files: ['app/config.json'] }, level: false })
+      expect(await repo.read('app/config.json')).toBe('{"v":"mine"}\n')
+      expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+      expect(await repo.run(['show', '@{u}:app/config.json'])).toBe('{"v":"theirs"}')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a pass with no picks (Push these now…) sends the files outside them too',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('app/x.txt', 'x\n')
+      await pass(repo, docsOnly)
+      expect(await repo.run(['status', '--porcelain', '-uall'])).toContain('app/x.txt')
+      await pass(repo)
+      expect(await (await otherComputer(remote)).read('app/x.txt')).toBe('x\n')
     },
     REAL_GIT_TIMEOUT_MS,
   )

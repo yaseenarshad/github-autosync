@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, FolderVerdict, ThemeChoice } from '@shared/types'
 import { CHECKS_EVERY, SENDS_AFTER } from '@shared/status'
 import { AddFolderSheet } from './AddFolderSheet'
+import { FolderPickerSheet } from './FolderPicker'
 import { platform } from '../lib/platform'
 
 export type SheetState =
@@ -13,6 +14,8 @@ export type SheetState =
   | { kind: 'folder-on'; id: string }
   | { kind: 'remove'; id: string }
   | { kind: 'rename'; id: string }
+  | { kind: 'pick-folders'; id: string }
+  | { kind: 'push-outside'; id: string }
 
 interface SheetProps {
   title: string
@@ -270,6 +273,22 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
       )
     case 'rename':
       return <RenameSheet folder={folder} onClose={onClose} />
+    case 'pick-folders':
+      return <FolderPickerSheet folder={folder} onClose={onClose} />
+    case 'push-outside':
+      return (
+        <ConfirmSheet title={`Push ${folder.outside.length === 1 ? 'this file' : `these ${folder.outside.length} files`} now?`} confirm="Push now" onConfirm={() => api.pushOutside(folder.id)} onClose={onClose}>
+          <p className="first">
+            They are outside the folders “{folder.name}” syncs. AutoSync sends them once, with everything else that waits, and then goes back to your
+            folders only.
+          </p>
+          <ul className="files">
+            {folder.outside.map((c) => (
+              <li key={c.path}>{c.path}</li>
+            ))}
+          </ul>
+        </ConfirmSheet>
+      )
   }
 }
 

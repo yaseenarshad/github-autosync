@@ -1,8 +1,10 @@
 // Moved out of sync.ts (itself copied from yaseen-draw-app@89b29c9) so pullRequest.ts shares it without an import cycle; new: `fromGhFailure`, `commitPending`, `rebaseKeepingBoth`, `countAhead`.
+import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
+import { inPicks, type Picks } from '@shared/status'
 import type { TooBigFile } from '@shared/types'
-import { repoState } from './detect'
+import { readWorking, repoState } from './detect'
 import { classifyGitFailure, firstMeaningfulLine, git, zList, type GitResult } from './exec'
 import type { GhFailure } from './github'
 import { resolveRebase } from './resolve'
@@ -43,6 +45,20 @@ async function oversize(root: string, rel: readonly string[]): Promise<TooBigFil
   return out
 }
 
+/**
+ * The picks as pathspecs git can use right now: a folder on disk, or one git still tracks (deleted
+ * here, so its deletions stage). A pathspec that matches nothing would fail the whole `add`.
+ */
+async function scopeOf(bin: string, root: string, picks: Picks): Promise<string[]> {
+  if (picks === null) return ['.']
+  const out: string[] = []
+  for (const p of picks) {
+    const spec = `:(literal)${p}`
+    if (existsSync(path.join(root, p)) || zList(await git(bin, root, ['ls-files', '-z', '--', spec])).length > 0) out.push(spec)
+  }
+  return out
+}
+
 /** How many times `git add` is asked before its failure is believed. */
 const STAGE_TRIES = 3
 
@@ -57,11 +73,14 @@ const STAGE_TRIES = 3
  *  - AFTER, anything staged over the line is unstaged — the belt for a file that grew in between.
  * OUT OF SCOPE: a file already COMMITTED over the limit; the push keeps failing (`error`).
  */
-async function stageWithinLimit(bin: string, root: string): Promise<{ failed: GitResult | null; tooBig: TooBigFile[] }> {
-  const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard']))
-  const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified']))
+async function stageWithinLimit(bin: string, root: string, picks: Picks): Promise<{ failed: GitResult | null; tooBig: TooBigFile[] }> {
+  // D44: nothing outside the picks is ever staged.
+  const scope = await scopeOf(bin, root, picks)
+  if (scope.length === 0) return { failed: null, tooBig: [] }
+  const untracked = zList(await git(bin, root, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...scope]))
+  const modified = zList(await git(bin, root, ['ls-files', '-z', '--modified', '--', ...scope]))
   const held = await oversize(root, [...new Set([...untracked, ...modified])])
-  const add = ['add', '-A', '--', '.', ...held.map((f) => `:(exclude,literal)${f.path}`)]
+  const add = ['add', '-A', '--', ...scope, ...held.map((f) => `:(exclude,literal)${f.path}`)]
   let staged = await git(bin, root, add)
   // A file being written while git reads it fails the whole add ("short read") and stages nothing. So a
   // refusal is asked again, whatever it said; a timeout (a negative code) is not.
@@ -74,8 +93,8 @@ async function stageWithinLimit(bin: string, root: string): Promise<{ failed: Gi
 }
 
 /** Local edits become one commit, minus anything GitHub would refuse (D11). `committed`: there was something to commit, and it is. */
-export async function commitPending(bin: string, root: string, host: string): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; committed: boolean }> {
-  const { failed, tooBig } = await stageWithinLimit(bin, root)
+export async function commitPending(bin: string, root: string, host: string, picks: Picks = null): Promise<{ failed: GitResult | null; tooBig: TooBigFile[]; committed: boolean }> {
+  const { failed, tooBig } = await stageWithinLimit(bin, root, picks)
   if (failed !== null) return { failed, tooBig, committed: false }
   const staged = zList(await git(bin, root, ['diff', '--cached', '--name-only', '-z']))
   if (staged.length === 0) return { failed: null, tooBig, committed: false }
@@ -115,16 +134,20 @@ const REBASE_TRIES = 3
  * written is not a problem to show anyone (D31) — its saves are committed and the next pass
  * replays them.
  */
-export async function rebaseKeepingBoth(bin: string, root: string, host: string, args: string[]): Promise<Verdict | null> {
+export async function rebaseKeepingBoth(bin: string, root: string, host: string, args: string[], picks: Picks = null): Promise<Verdict | null> {
+  const clash = await outsideClash(bin, root, picks)
+  if (clash.length > 0) return { ...CLEAN, attention: { kind: 'outside-changed', files: clash }, fetched: true }
   let failed: GitResult | null = null
   for (let left = REBASE_TRIES; ; left -= 1) {
     // D16, asked again: the user may have started a merge or a rebase since the pass began.
     const { busy } = await repoState(bin, root)
     if (busy !== null) return { ...CLEAN, attention: { kind: 'busy-repo', detail: busy }, fetched: true }
-    const late = await commitPending(bin, root, host)
+    const late = await commitPending(bin, root, host, picks)
     if (late.failed !== null) return fromFailure(late.failed, late.tooBig, true)
     if (left === 0) return failed !== null && !late.committed ? fromFailure(failed, late.tooBig, true) : { ...CLEAN, fetched: true, tooBig: late.tooBig }
-    failed = await parkWhileRebasing(bin, root, late.tooBig, async () => {
+    // Held back: too big (D11), and what changed outside the picks (D45) — `rebase` refuses a tree with either.
+    const outside = (await readWorking(bin, root)).filter((c) => !inPicks(picks, c.path)).map((c) => c.path)
+    failed = await parkWhileRebasing(bin, root, [...late.tooBig.map((f) => f.path), ...outside], async () => {
       const rebased = await git(bin, root, ['rebase', ...args])
       if (rebased.code === 0) return null
       // Refused before it began (a save under it): nothing to settle or abort, and the save stays as it is on disk.
@@ -169,8 +192,8 @@ export const countAhead = async (bin: string, root: string): Promise<number> => 
  * the stash is only restored and dropped when `refs/stash` moved to a new entry — the user's own
  * stashes are never touched.
  */
-async function parkWhileRebasing(bin: string, root: string, tooBig: readonly TooBigFile[], rebase: () => Promise<GitResult | null>): Promise<GitResult | null> {
-  const tracked = tooBig.length === 0 ? [] : zList(await git(bin, root, ['ls-files', '-z', '--', ...tooBig.map((f) => `:(literal)${f.path}`)]))
+async function parkWhileRebasing(bin: string, root: string, held: readonly string[], rebase: () => Promise<GitResult | null>): Promise<GitResult | null> {
+  const tracked = held.length === 0 ? [] : zList(await git(bin, root, ['ls-files', '-z', '--', ...held.map((p) => `:(literal)${p}`)]))
   if (tracked.length === 0) return rebase()
   const specs = tracked.map((p) => `:(literal)${p}`)
   const before = await stashTop(bin, root)
@@ -185,6 +208,19 @@ async function parkWhileRebasing(bin: string, root: string, tooBig: readonly Too
     await git(bin, root, ['reset', '-q', '--', ...specs])
     if ((await stashTop(bin, root)) === ours) await git(bin, root, ['stash', 'drop', '-q'])
   }
+}
+
+/**
+ * D45: files changed here outside the picks that GitHub changed too. Parking them around the
+ * rebase and copying them back would undo the other computer's change on this one, without a word,
+ * so the pass stops before the rebase instead and lists them. Empty with no picks.
+ */
+async function outsideClash(bin: string, root: string, picks: Picks): Promise<string[]> {
+  if (picks === null) return []
+  const outside = (await readWorking(bin, root)).filter((c) => !inPicks(picks, c.path)).map((c) => c.path)
+  if (outside.length === 0) return []
+  const theirs = new Set(zList(await git(bin, root, ['diff', '--name-only', '-z', 'HEAD...@{u}'])))
+  return outside.filter((p) => theirs.has(p)).sort()
 }
 
 /** The newest stash entry's sha, or '' when there is none. */

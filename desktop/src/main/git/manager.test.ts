@@ -45,7 +45,7 @@ interface Harness {
   manager: SyncManager
   passes: Array<{ root: string; flush: boolean }>
   /** What each pass was told beyond `flush`: the rules it may assume and whether it may send. */
-  given: Array<{ policy: RepoPolicy | null; publish: boolean }>
+  given: Array<{ policy: RepoPolicy | null; publish: boolean; paths: readonly string[] | null }>
   /** `forgetInFlight` calls, with how many passes had run by then. */
   forgotten: Array<{ root: string; afterPasses: number }>
   /** Every folder status the manager reported, in order (one snapshot per `onChange`). */
@@ -77,7 +77,7 @@ function harness(opts: Opts = {}): Harness {
   const host: SyncHost = {
     sync: async (root, o) => {
       passes.push({ root, flush: o.flush })
-      given.push({ policy: o.policy, publish: o.publish })
+      given.push({ policy: o.policy, publish: o.publish, paths: o.settings.paths })
       return opts.pass === undefined ? result() : opts.pass(passes.length, o.onDirection)
     },
     peek: async () => {
@@ -693,6 +693,25 @@ describe('push and pull per repo (D37 to D42, D52)', () => {
     h.emit()
     await until(() => h.status().sendAt !== null)
     expect(h.status().pullAt).toBeNull()
+    h.manager.setFolders([], false)
+  })
+
+  it('an edit outside the picked folders is listed but starts no push (D46, D47)', async () => {
+    const outside: FileChange[] = [{ status: 'M', path: 'app/db.sqlite' }]
+    const h = harness({ quietMs: 10, peek: async () => outside })
+    h.manager.setFolders([{ ...A, settings: { ...DEFAULT_SETTINGS, paths: ['docs'] } }], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    await until(() => h.status().outside.length === 1)
+    await sleep(40)
+    expect(h.status()).toMatchObject({ state: 'synced', pending: [], sendAt: null })
+    expect(h.passes).toHaveLength(1)
+
+    // Push these now…: one send that takes the whole repo, then back to the picks.
+    await h.manager.pushOutside('a')
+    expect(h.given.map((g) => g.paths)).toEqual([['docs'], null])
+    await h.manager.syncNow('a')
+    expect(h.given[2]?.paths).toEqual(['docs'])
     h.manager.setFolders([], false)
   })
 

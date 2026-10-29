@@ -88,8 +88,8 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
       {problem && <ProblemCard folder={f} attention={problem} />}
       {f.tooBig.length > 0 && f.enabled && <TooBigCard folder={f} />}
 
-      <NotSyncing folder={f} view={v} paused={status.paused} />
-      <SyncSettings folder={f} status={status} />
+      <NotSyncing folder={f} view={v} paused={status.paused} onSheet={onSheet} />
+      <SyncSettings folder={f} status={status} onSheet={onSheet} />
       <ActivityLog key={f.id} folder={f} />
 
       <div className="section">
@@ -257,6 +257,13 @@ function problemText(a: Attention): { title: string; body: string } {
         body: `One folder, one syncer: AutoSync is standing back and changing nothing until one of them is off. Turn off GitHub sync for this folder in the ${app} app, or turn this folder off here.`,
       }
     }
+    case 'outside-changed': {
+      const n = a.files?.length ?? 0
+      return {
+        title: `${plural(n, 'file')} outside your synced folders changed here and on GitHub`,
+        body: `AutoSync stopped before pulling, so neither version is lost. It only syncs the folders you picked, and won't overwrite either side of these files. Settle them by hand, then check again.`,
+      }
+    }
     // no-git never gets here: the global banner covers it.
     case 'no-git':
     case 'error':
@@ -288,6 +295,15 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
         </ul>
       )}
       {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh') && a.detail && <div className="prompt">{a.detail}</div>}
+      {a.kind === 'outside-changed' && (
+        <ul className="pairs">
+          {a.files?.map((p) => (
+            <li key={p}>
+              <span>{p}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {a.kind === 'pr-closed' && a.detail && (
         <div className="cb">
           <GitHubLink url={a.detail}>{webLabel(a.detail)}</GitHubLink>
@@ -344,7 +360,7 @@ function TooBigCard({ folder: f }: { folder: FolderStatus }) {
   )
 }
 
-function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: FolderView; paused: boolean }) {
+function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus; view: FolderView; paused: boolean; onSheet: (sheet: SheetState) => void }) {
   const reason = f.offline
     ? 'Waiting — offline'
     : paused || !f.enabled
@@ -361,7 +377,7 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
                 ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
                 : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
-  const count = f.pending.length + f.tooBig.length + (ignored ? 1 : 0)
+  const count = f.pending.length + f.outside.length + f.tooBig.length + (ignored ? 1 : 0)
 
   return (
     <div className="section">
@@ -380,6 +396,21 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
             <span className="m">{reason}</span>
           </div>
         ))}
+        {f.outside.map((c) => (
+          <div className="tr" key={c.path}>
+            <span className={`st ${c.status}`}>{c.status}</span>
+            <span className="f">{c.path}</span>
+            <span className="m">Outside your synced folders</span>
+          </div>
+        ))}
+        {f.outside.length > 0 && f.enabled && !paused && (
+          <div className="tr">
+            <span className="grow muted">These stay on {platform.here} until you push them yourself.</span>
+            <button className="btn" onClick={() => onSheet({ kind: 'push-outside', id: f.id })}>
+              Push these now…
+            </button>
+          </div>
+        )}
         {f.tooBig.map((t) => (
           <div className="tr" key={t.path}>
             <span className="st D" title="Skipped">

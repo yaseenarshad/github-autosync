@@ -34,6 +34,8 @@ function mockApi(status: AppStatus) {
     setRepoSettings: vi.fn(async () => status),
     pickSettingsFolder: vi.fn(async (): Promise<string | null> => null),
     setSettingsFolder: vi.fn(async () => status),
+    listFolders: vi.fn(async (_id: string, rel: string): Promise<string[]> => (rel === '' ? ['docs', 'app'] : [])),
+    pushOutside: vi.fn(async () => {}),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -289,6 +291,33 @@ describe('sync settings (D34, D35)', () => {
     await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', repo: null })]))
     await click(button('notes'))
     expect(document.querySelector<HTMLSelectElement>('select[aria-label="Push"]')!.disabled).toBe(true)
+  })
+
+  it('picks folders one level at a time and saves them; a parent covers its children (D44)', async () => {
+    const api = await mount(oneFolder)
+    api.listFolders.mockImplementation(async (_id: string, rel: string) => (rel === '' ? ['app', 'docs'] : rel === 'docs' ? ['docs/notes'] : []))
+    await click(button('notes'))
+    await click(button('Choose folders…'))
+    await click(document.querySelectorAll<HTMLInputElement>('input[name="scope"]')[1]!)
+    expect(button('Save').disabled).toBe(true) // nothing picked yet
+
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Open docs"]')!)
+    await click(document.querySelector<HTMLInputElement>('input[aria-label="docs/notes"]')!)
+    await click(document.querySelector<HTMLInputElement>('input[aria-label="docs"]')!)
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="docs/notes"]')!.disabled).toBe(true)
+    await click(button('Save'))
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 1, paths: ['docs'], beforePush: null })
+  })
+
+  it('lists changes outside the picks, and Push these now asks first (D46)', async () => {
+    const outside = [{ status: 'M' as const, path: 'app/db.sqlite' }]
+    const api = await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', outside, settings: { push: 'auto', pull: 1, paths: ['docs'], beforePush: null } })]))
+    await click(button('notes'))
+    expect(document.body.textContent).toContain('Outside your synced folders')
+    await click(button('Push these now…'))
+    expect(api.pushOutside).not.toHaveBeenCalled()
+    await click(button('Push now'))
+    expect(api.pushOutside).toHaveBeenCalledWith('notes')
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {

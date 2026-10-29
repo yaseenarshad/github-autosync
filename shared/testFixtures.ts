@@ -21,6 +21,7 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
     publishVia: 'push',
     pr: null,
     pending: [],
+    outside: [],
     tooBig: [],
     ignored: { patterns: [], count: 0 },
     alsoSyncedBy: null,

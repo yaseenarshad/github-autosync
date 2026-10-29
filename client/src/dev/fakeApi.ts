@@ -29,6 +29,7 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     publishVia: 'push',
     pr: null,
     pending: [],
+    outside: [],
     tooBig: [],
     ignored: { patterns: ['.DS_Store'], count: 3 },
     alsoSyncedBy: null,
@@ -239,6 +240,8 @@ export function createFakeApi(): AutoSyncApi {
     setRepoSettings: (id, settings) => patch(id, { settings }),
     pickSettingsFolder: () => Promise.resolve(window.prompt('Settings folder (fake picker)', `${HOME}/Documents/GitHub/yaseen-os/Sync/github-autosync-settings`)),
     setSettingsFolder: (settingsFolder) => set({ ...status, settingsFolder }),
+    listFolders: async (_id, rel) => (rel === '' ? ['docs', 'evals', 'app'] : rel.split('/').length < 3 ? [`${rel}/notes`, `${rel}/drafts`] : []),
+    pushOutside: (id) => patch(id, { outside: [] }).then(() => undefined),
     showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
     // Fake ids are the folder names.
     setAlias: (id, alias) => patch(id, { alias, name: alias ?? id }),

@@ -33,6 +33,10 @@ export interface AutoSyncApi {
   pickSettingsFolder(): Promise<string | null>
   /** D35: null stops sharing; this computer keeps its own copy. */
   setSettingsFolder(path: string | null): Promise<AppStatus>
+  /** D44: the folder picker — the folders right under `rel` ('' is the top), without what git ignores. */
+  listFolders(id: string, rel: string): Promise<string[]>
+  /** D46: one send that also takes the changes outside the picked folders; resolves when it is done. */
+  pushOutside(id: string): Promise<void>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */

@@ -400,6 +400,13 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
 .select:disabled { opacity: .55; }
 .set .acts, .action .acts { display: flex; gap: 6px; flex: none; }
 .d.warn { color: var(--warn); }
+.radio { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+.tree { border: 1px solid var(--soft-border); border-radius: 8px; padding: 6px 8px; margin: 8px 0; max-height: 280px; overflow: auto; }
+.tree-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12.5px; }
+.tree-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tree-kids { padding-left: 20px; }
+.twisty { border: 0; background: none; color: var(--muted); width: 16px; padding: 0; cursor: pointer; font-size: 11px; }
+.sheet .files { margin: 8px 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12px; max-height: 200px; overflow: auto; }
 
 @media (max-width: 900px) {
   .body { grid-template-columns: 220px 1fr; }

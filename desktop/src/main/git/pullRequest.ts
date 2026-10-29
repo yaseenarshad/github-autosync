@@ -77,7 +77,7 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
       // S20: a batch no longer under HEAD (the user reset past it) replays nothing and is only forgotten — history is theirs.
       if ((await git(bin, root, ['merge-base', '--is-ancestor', batch, 'HEAD'])).code === 0) {
         opts.onDirection?.('down')
-        const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['--onto', '@{u}', batch])
+        const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['--onto', '@{u}', batch], opts.settings?.paths ?? null)
         if (stopped !== null) return stopped
       }
     }
@@ -90,7 +90,7 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
   let [behind = 0, ahead = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
   if (behind > 0) {
     opts.onDirection?.('down')
-    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
+    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'], opts.settings?.paths ?? null)
     if (stopped !== null) return stopped
     ahead = await countAhead(bin, root)
   }

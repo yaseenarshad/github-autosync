@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/sync.ts; changes: AutoSync result shape, busy-repo refusal, keep-both resolve, host in the subject, 95 MiB line with sizes, no .DS_Store/.gitignore edits, post-pass facts, other-app refusal and the PR route (D22–D29; shared helpers moved to pass.ts).
 import os from 'node:os'
-import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, TooBigFile } from '@shared/types'
+import type { Attention, ConflictPair, FileChange, OtherApp, PullRequestRef, RepoSettings, TooBigFile } from '@shared/types'
 import { findGit, git } from './exec'
 import { isRepoRoot, otherApp, readConflicts, readIgnored, readPending, repoState, type RepoState } from './detect'
 import { ghCli, type GitHub, type RepoPolicy } from './github'
@@ -46,6 +46,8 @@ export interface PassOptions {
   policy?: RepoPolicy | null
   /** False on quiet passes: they commit here and receive, never send — in PR mode (D24) and push mode (D40). */
   publish?: boolean
+  /** D34: the repo's settings for this pass (its picks, D44); absent is the whole repo. */
+  settings?: RepoSettings
 }
 
 /** Everything the status shows that a pass re-reads when it ends. */
@@ -122,7 +124,7 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
   if (policy?.requiresPr === true && repo.branch !== policy.defaultBranch) return { ...CLEAN, attention: SIDE_BRANCH, policy }
 
   // ---------- 1. local edits become one commit (minus anything GitHub would refuse — D11) ----------
-  const { failed, tooBig } = await commitPending(bin, root, opts.host)
+  const { failed, tooBig } = await commitPending(bin, root, opts.host, opts.settings?.paths ?? null)
   if (failed !== null) return fromFailure(failed, tooBig)
 
   if (gh !== null && policy?.requiresPr === true) return { ...(await exchangeViaPr(bin, root, gh, policy, tooBig, opts)), policy }
@@ -177,7 +179,7 @@ async function exchange(bin: string, root: string, tooBig: TooBigFile[], opts: P
   // ---------- 3. replay our commits on top of theirs; same-file conflicts keep both (D6) ----------
   if (behind > 0 && !flush) {
     opts.onDirection?.('down')
-    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
+    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'], opts.settings?.paths ?? null)
     if (stopped !== null) return stopped
     ahead = await countAhead(bin, root)
   }

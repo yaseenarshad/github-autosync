@@ -9,8 +9,9 @@ export type SyncState = 'off' | 'synced' | 'pending' | 'syncing' | 'attention'
  * `busy-repo` = mid-rebase, mid-merge, detached HEAD, or a side branch of a PR-rule repo — AutoSync never touches it (D16, D29).
  * `no-gh` = the repo needs PRs and `gh` is missing or logged out (D28). `pr-closed` = a human closed the batch's PR (D25).
  * `other-app` = the Docs/Draw app syncs this folder too; AutoSync stands back (D27).
+ * `outside-changed` = a file outside the picked folders changed here and on GitHub; the pull waits for the user (D45).
  */
-export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'error'
+export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'outside-changed' | 'error'
 
 /** Repo-relative paths: the original file and the `<name> (conflict <host>, <YYYY-MM-DD>)<ext>` copy beside it. */
 export interface ConflictPair {
@@ -26,6 +27,8 @@ export interface Attention {
    */
   detail?: string
   conflicts?: ConflictPair[]
+  /** `outside-changed`: the repo-relative files changed on both sides (D45). */
+  files?: string[]
 }
 
 export type FileStatus = 'M' | 'A' | 'D' | 'R'
@@ -93,6 +96,8 @@ export interface FolderStatus {
   pr: PullRequestRef | null
   /** Changes on this computer that are not on GitHub yet: uncommitted + committed-but-unpushed. */
   pending: FileChange[]
+  /** D46: changes outside the picked folders — they stay here and never make the folder pending. */
+  outside: FileChange[]
   /** Never staged: ≥ 95 MiB (D11). */
   tooBig: TooBigFile[]
   /** Top-level `.gitignore` patterns and how many files git currently ignores (D10). */

@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode, PR mode (D24, D26).
 import path from 'node:path'
-import { AUTO_CAP_MS, DEBOUNCE_MS, DEFAULT_SETTINGS, MINUTE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, PR_CAP_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
+import { AUTO_CAP_MS, DEBOUNCE_MS, DEFAULT_SETTINGS, inPicks, MINUTE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, PR_CAP_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
 import type { Attention, AttentionKind, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, RepoSettings, SyncState, TooBigFile } from '@shared/types'
 import { repoKey, webUrlOf } from './detect'
 import type { RepoPolicy } from './github'
@@ -67,7 +67,7 @@ type PassMode = 'quiet' | 'normal' | 'flush'
 const MODE_RANK: Record<PassMode, number> = { quiet: 0, normal: 1, flush: 2 }
 
 export interface SyncHost {
-  sync(root: string, opts: { flush: boolean; policy: RepoPolicy | null; publish: boolean; onDirection: (direction: 'up' | 'down') => void }): Promise<PassResult>
+  sync(root: string, opts: { flush: boolean; policy: RepoPolicy | null; publish: boolean; settings: RepoSettings; onDirection: (direction: 'up' | 'down') => void }): Promise<PassResult>
   /** D25 "Send again": forget the batch whose PR was closed. */
   forgetInFlight(root: string): Promise<void>
   /** The pending list alone; null when it cannot be read. */
@@ -98,6 +98,8 @@ export interface SyncManager {
   flushForQuit(): Promise<void>
   /** D25: send a batch whose PR a human closed again, as a fresh PR; resolves when the pass is done. */
   resend(id: string): Promise<void>
+  /** D46: one send that also takes the changes outside the picked folders. */
+  pushOutside(id: string): Promise<void>
 }
 
 type Timer = ReturnType<typeof setTimeout>
@@ -136,7 +138,12 @@ interface Entry {
   offline: boolean
   branch: string | null
   remoteUrl: string | null
+  /** Inside the picks: what the push timer waits for. */
   pending: FileChange[]
+  /** D46: outside the picks — listed, never sent on their own. */
+  outside: FileChange[]
+  /** D46: the next send also takes `outside`, once. */
+  outsideOnce: boolean
   pendingSince: number | null
   tooBig: TooBigFile[]
   ignored: { patterns: string[]; count: number }
@@ -185,6 +192,8 @@ function fresh(cfg: FolderConfig): Entry {
     branch: null,
     remoteUrl: null,
     pending: [],
+    outside: [],
+    outsideOnce: false,
     pendingSince: null,
     tooBig: [],
     ignored: { patterns: [], count: 0 },
@@ -227,6 +236,7 @@ function toStatus(e: Entry): FolderStatus {
     publishVia: publishVia(e),
     pr: e.pr,
     pending: e.pending,
+    outside: e.outside,
     tooBig: e.tooBig,
     ignored: e.ignored,
     alsoSyncedBy: e.alsoSyncedBy,
@@ -247,7 +257,11 @@ function toStatus(e: Entry): FolderStatus {
  */
 function setPending(e: Entry, pending: FileChange[]): void {
   const held = new Set(e.tooBig.map((f) => f.path))
-  e.pending = pending.filter((c) => !held.has(c.path))
+  const { paths } = settingsOf(e)
+  const unsent = pending.filter((c) => !held.has(c.path))
+  // D46, D47: a change outside the picks is listed, but never waits for a send.
+  e.pending = unsent.filter((c) => inPicks(paths, c.path))
+  e.outside = unsent.filter((c) => !inPicks(paths, c.path))
   if (e.pending.length === 0) e.pendingSince = null
   else e.pendingSince ??= Date.now()
 }
@@ -336,6 +350,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
         flush: mode === 'flush',
         policy: e.policy,
         publish: mode !== 'quiet',
+        // D46: "Push these now…" sends the whole repo once.
+        settings: e.outsideOnce && mode !== 'quiet' ? { ...settingsOf(e), paths: null } : settingsOf(e),
         onDirection: (direction) => {
           if (mode === 'quiet' || !current(e)) return
           e.direction = direction
@@ -343,6 +359,7 @@ export function createSyncManager(host: SyncHost): SyncManager {
         },
       })
       .catch(crashed)
+    if (mode !== 'quiet') e.outsideOnce = false
     e.syncing = false
     e.direction = null
     e.lastPassAt = Date.now()
@@ -442,6 +459,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
 
   /** Settings changed (D34): the timers follow at once. */
   function retime(e: Entry): void {
+    // New picks (D44) sort the same changes again.
+    setPending(e, [...e.pending, ...e.outside])
     if (e.busy || e.pr !== null) return
     cancelSend(e)
     if (e.poll !== null) clearTimeout(e.poll)
@@ -544,6 +563,13 @@ export function createSyncManager(host: SyncHost): SyncManager {
         if (settingsOf(e).push !== 'manual') jobs.push(requestPass(e, 'flush'))
       }
       await Promise.all(jobs)
+    },
+
+    async pushOutside(id) {
+      const e = entries.get(id)
+      if (e === undefined || !e.active) return
+      e.outsideOnce = true
+      await requestPass(e, 'normal')
     },
 
     async resend(id) {
