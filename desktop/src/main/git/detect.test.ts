@@ -169,6 +169,12 @@ describe('listSubfolders (D44)', () => {
       expect(await listSubfolders(bin, repo.root, '')).toEqual(['app', 'docs'])
       expect(await listSubfolders(bin, repo.root, 'docs')).toEqual(['docs/deep'])
       expect(await listSubfolders(bin, repo.root, 'docs/deep')).toEqual([])
+      // More folders than one `check-ignore` call takes (item 33): every batch is asked.
+      for (let i = 0; i < 450; i += 1) await repo.write(`many/f${String(i).padStart(3, '0')}/x.md`, 'x\n')
+      await repo.write('.gitignore', 'node_modules/\nbuild\nmany/f44*/\n')
+      const many = await listSubfolders(bin, repo.root, 'many')
+      expect(many).toHaveLength(440)
+      expect(many).not.toContain('many/f440')
     } finally {
       await repo.cleanup()
     }

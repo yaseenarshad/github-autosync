@@ -1,15 +1,16 @@
 import { app, BrowserWindow, Menu, nativeTheme, Notification, powerMonitor, type MenuItemConstructorOptions } from 'electron'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join, sep } from 'node:path'
+import { pushLabel } from '@shared/status'
 import type { AppStatus, NavTarget, OtherRepo } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
 import { findGit } from './git/exec'
-import { createSyncManager, type FolderConfig } from './git/manager'
+import { createSyncManager } from './git/manager'
 import { forgetInFlight } from './git/pullRequest'
 import { hostName, peekPending, syncFolder } from './git/sync'
 import { registerIpc, throttle } from './ipc'
 import { createNoticeRules, type Notice } from './notify'
-import { createRegistry, settingsOf } from './registry'
+import { createRegistry, settingsOf, withLearnedRemotes } from './registry'
 import { followSettingsFolder, type SettingsFolder } from './settingsFolder'
 import { findClones, othersFrom } from './others'
 import { createTray } from './tray'
@@ -51,8 +52,8 @@ const manager = createSyncManager({
 /** D35: started with the app (a second instance must never touch it); see `whenReady`. */
 let settingsFolder: SettingsFolder | undefined
 
-/** D53: where each other computer's repo is on this one, by key; refreshed by `findOthers`. */
-let clones = new Map<string, string | null>()
+/** D53: where each other computer's repo is on this one, and whether its remote is gone, by key; refreshed by `findOthers`. */
+let clones = new Map<string, { found: string | null; gone: boolean }>()
 /** D54: clones running or failed, by key. */
 const cloneState = new Map<string, { cloning: boolean; error: string | null }>()
 let finding = false
@@ -60,7 +61,7 @@ let findAgain = false
 
 /** The other computers' repos as the window shows them: always from the latest files and config. */
 function othersNow(): OtherRepo[] {
-  return othersFrom(registry.get(), settingsFolder?.others() ?? [], homedir()).map((o) => ({ ...o, found: clones.get(o.key) ?? null, ...cloneState.get(o.key) }))
+  return othersFrom(registry.get(), settingsFolder?.others() ?? [], homedir()).map((o) => ({ ...o, ...clones.get(o.key), ...cloneState.get(o.key) }))
 }
 
 /** D53: look for clones on this computer; one run at a time, and one more if asked during it. */
@@ -72,7 +73,7 @@ function findOthers(): void {
   finding = true
   void findClones(othersNow(), registry.get())
     .then((found) => {
-      clones = new Map(found.map((o) => [o.key, o.found]))
+      clones = new Map(found.map((o) => [o.key, { found: o.found, gone: o.gone }]))
     })
     .catch((err: unknown) => console.warn(`[others] ${String(err)}`))
     .finally(() => {
@@ -83,6 +84,23 @@ function findOthers(): void {
         findOthers()
       }
     })
+}
+
+/**
+ * Item 31: the settings travel only as often as the repo that holds the settings folder pushes.
+ * Says so when that is slower than Auto, or when nothing here syncs the folder at all.
+ */
+function settingsFolderNote(config: ReturnType<typeof registry.get>): string | null {
+  const dir = config.settingsFolder
+  if (dir === null) return null
+  const holder = config.folders.find((f) => dir === f.path || dir.startsWith(`${f.path}${sep}`))
+  if (holder === undefined) return 'AutoSync does not sync this folder on this computer, so the settings travel only if something else syncs it.'
+  const name = holder.alias ?? basename(holder.path)
+  if (!holder.enabled) return `${name} is off here, so the settings do not travel until it is on.`
+  const { push } = settingsOf(config, holder)
+  if (push === 'manual') return `The settings travel only when you push ${name} by hand.`
+  if (push !== 'auto') return `The settings travel only ${pushLabel(push).toLowerCase()}, with the push of ${name}.`
+  return null
 }
 
 /** The manager runs each folder with its repo's settings (D34). */
@@ -99,13 +117,9 @@ function runFolders(): void {
  * D34 (or whose origin changed) gets it stored here, and its repo's settings apply.
  */
 function learnRemotes(): void {
-  const seen = new Map(manager.folders().map((f) => [f.id, f.remoteUrl]))
-  const learned = (f: FolderConfig): string | null => {
-    const remote = seen.get(f.id) ?? null
-    return remote !== null && remote !== f.remote ? remote : null
-  }
-  if (!registry.get().folders.some((f) => learned(f) !== null)) return
-  registry.update((c) => ({ ...c, folders: c.folders.map((f) => ({ ...f, remote: learned(f) ?? f.remote })) }))
+  const next = withLearnedRemotes(registry.get(), new Map(manager.folders().map((f) => [f.id, f.remoteUrl])))
+  if (next === null) return
+  registry.update(() => next)
   apply()
 }
 
@@ -168,6 +182,7 @@ function status(): AppStatus {
     theme: config.theme,
     settingsFolder: config.settingsFolder,
     settingsFolderMissing: settingsFolder?.missing() ?? false,
+    settingsFolderNote: settingsFolderNote(config),
     others: othersNow(),
   }
 }

@@ -46,6 +46,7 @@ export function othersFrom(config: Config, files: readonly MacFile[], home: stri
         cloning: false,
         error: null,
         hidden: config.hiddenRepos.includes(key),
+        gone: false,
         settings: config.repos[key]?.settings ?? repo.settings,
       })
     }
@@ -65,6 +66,22 @@ async function keyAt(bin: string, dir: string): Promise<string | null> {
  * folder swapped, else a folder beside this computer's synced folders (one level). Runs when the
  * window opens and when a settings file changes, never on a timer.
  */
+/** How long an answer from a remote is kept: the search runs on every window focus. */
+const GONE_TTL_MS = 10 * 60_000
+/** git's words for a remote that is not there; a network failure says something else and never counts. */
+const NOT_THERE = /repository not found|does not appear to be a git repository|does not exist|not found/i
+const goneCache = new Map<string, { gone: boolean; at: number }>()
+
+/** D35 (item 35): true when the remote answers that the repo is not there. Offline or slow: false, so nothing is hidden by mistake. */
+async function goneFromRemote(bin: string, url: string): Promise<boolean> {
+  const cached = goneCache.get(url)
+  if (cached !== undefined && Date.now() - cached.at < GONE_TTL_MS) return cached.gone
+  const res = await git(bin, path.parse(process.cwd()).root, ['ls-remote', '--exit-code', '-h', '--', url], { timeoutMs: 15_000 })
+  const gone = res.code !== 0 && NOT_THERE.test(res.stderr)
+  goneCache.set(url, { gone, at: Date.now() })
+  return gone
+}
+
 export async function findClones(others: readonly OtherRepo[], config: Config): Promise<OtherRepo[]> {
   const bin = await findGit()
   if (bin === null || others.length === 0) return [...others]
@@ -83,7 +100,8 @@ export async function findClones(others: readonly OtherRepo[], config: Config): 
   const out: OtherRepo[] = []
   for (const o of others) {
     const found = (await keyAt(bin, o.expectedPath)) === o.key ? o.expectedPath : (nearby.get(o.key) ?? null)
-    out.push({ ...o, found })
+    // Only a repo with no clone here is asked: a found clone can still be added, and its own passes say if the repo is gone.
+    out.push({ ...o, found, gone: found === null && !o.hidden ? await goneFromRemote(bin, o.remoteUrl) : false })
   }
   return out
 }

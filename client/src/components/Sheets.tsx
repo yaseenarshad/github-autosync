@@ -151,13 +151,15 @@ function SettingsFolderRow({ status }: { status: AppStatus }) {
     ? `Not set: each folder's settings stay on ${platform.here}. Pick a folder that git syncs to share them with your other computers.`
     : status.settingsFolderMissing
       ? `Can't find ${status.settingsFolder}. AutoSync keeps its own copy until it's back.`
-      : `${status.settingsFolder} · each computer writes its own file here`
+      : status.settingsFolderNote !== null
+        ? `${status.settingsFolder} · ${status.settingsFolderNote}`
+        : `${status.settingsFolder} · each computer writes its own file here`
   async function choose() {
     const picked = await api.pickSettingsFolder()
     if (picked !== null) await api.setSettingsFolder(picked)
   }
   return (
-    <Setting title="Settings folder" detail={detail} warn={status.settingsFolderMissing}>
+    <Setting title="Settings folder" detail={detail} warn={status.settingsFolderMissing || status.settingsFolderNote !== null}>
       <div className="acts">
         <button className="btn" onClick={choose}>
           Choose…

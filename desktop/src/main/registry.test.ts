@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { tempDir } from './git/gitFixture'
 import { DEFAULT_SETTINGS } from '@shared/status'
-import { createRegistry, MAC_ID, newFolder, settingsOf, withAlias, withRepoSettings } from './registry'
+import { createRegistry, MAC_ID, newFolder, settingsOf, withAlias, withLearnedRemotes, withRepoSettings } from './registry'
 
 /** What a fresh registry holds: a new random computer id, nothing else set. */
 const DEFAULTS = { version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system', macId: expect.stringMatching(MAC_ID), settingsFolder: null, repos: {}, hiddenRepos: [] }
@@ -141,5 +141,17 @@ describe('registry (D5)', () => {
   ])('refuses to save repo settings it could not load again (%j)', async (bad) => {
     const registry = createRegistry(await dir())
     expect(() => registry.update((c) => ({ ...c, repos: { k: { settings: bad as never, savedAt: 1 } } }))).toThrow(/malformed/)
+  })
+
+  it('moves a repo’s settings to its new key when its origin changes (a rename on GitHub, item 32)', async () => {
+    const registry = createRegistry(await dir())
+    const folder = newFolder('/Users/me/lab', 'https://github.com/me/old-name.git')
+    const settings = { push: 60 as const, pull: 5 as const, paths: ['docs'], beforePush: null }
+    const config = registry.update((c) => withRepoSettings({ ...c, folders: [folder] }, 'github.com/me/old-name', settings, 7))
+    expect(withLearnedRemotes(config, new Map([[folder.id, folder.remote ?? null]]))).toBeNull()
+    const next = withLearnedRemotes(config, new Map([[folder.id, 'git@github.com:Me/New-Name.git']]))
+    expect(next?.folders[0]?.remote).toBe('git@github.com:Me/New-Name.git')
+    expect(next?.repos['github.com/me/new-name']).toEqual({ settings, savedAt: 7 })
+    expect(settingsOf(next!, next!.folders[0]!)).toEqual(settings)
   })
 })

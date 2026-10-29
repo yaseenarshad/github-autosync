@@ -138,6 +138,8 @@ export interface AppStatus {
   settingsFolder: string | null
   /** The chosen settings folder cannot be read or written right now; this computer keeps its own copy. */
   settingsFolderMissing: boolean
+  /** Why the settings may travel slowly, or not at all, from this computer; null when they travel with each change. */
+  settingsFolderNote: string | null
   /** D53: repos the other computers sync that this one does not have, hidden ones included. */
   others: OtherRepo[]
 }
@@ -162,6 +164,8 @@ export interface OtherRepo {
   error: string | null
   /** "Not on this Mac": hidden until Settings → Show hidden repos. */
   hidden: boolean
+  /** Its remote says the repo is not there (deleted, renamed, or no access): there is nothing to download. */
+  gone: boolean
   /** The settings it starts with when added here (D35): the newest any computer saved. */
   settings: RepoSettings
 }

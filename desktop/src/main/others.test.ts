@@ -39,7 +39,7 @@ describe('the other computers’ repos (D53)', () => {
     ]
     const cfg = await config([newFolder('/Users/yasin/notes', 'https://github.com/Me/Notes.git')], ['github.com/me/lab'])
     expect(othersFrom(cfg, files, '/Users/yasin')).toEqual([
-      { key: 'github.com/me/lab', name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio', 'MacBook-Air'], expectedPath: path.join('/Users/yasin', 'GitHub', 'lab'), found: null, cloning: false, error: null, hidden: true, settings: DEFAULT_SETTINGS },
+      { key: 'github.com/me/lab', name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio', 'MacBook-Air'], expectedPath: path.join('/Users/yasin', 'GitHub', 'lab'), found: null, cloning: false, error: null, hidden: true, gone: false, settings: DEFAULT_SETTINGS },
     ])
   })
 
@@ -62,6 +62,25 @@ describe('the other computers’ repos (D53)', () => {
       await rename(clone.root, beside)
       const found = await findClones(others, await config([newFolder(synced)]))
       expect(found[0]?.found).toBe(beside)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('a repo gone from its remote (item 35)', () => {
+  it(
+    'is marked gone when the remote is not there, and not when it is',
+    async () => {
+      const remote = await makeBareRemote()
+      cleanups.push(remote.cleanup)
+      const missing = path.join(await dir('nothing'), 'deleted.git')
+      const others = othersFrom(
+        await config([]),
+        [{ macId: 'a', name: 'Mac-Studio', repos: { live: repo(remote.url, '/Users/sam/live'), dead: repo(missing, '/Users/sam/dead') } }],
+        '/nowhere',
+      )
+      const found = await findClones(others, await config([]))
+      expect(Object.fromEntries(found.map((o) => [o.key, o.gone]))).toEqual({ dead: true, live: false })
     },
     REAL_GIT_TIMEOUT_MS,
   )

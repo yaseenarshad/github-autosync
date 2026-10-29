@@ -97,9 +97,10 @@ export function createFakeApi(): AutoSyncApi {
     theme: 'system',
     settingsFolder: `${HOME}/Documents/GitHub/yaseen-os/Sync/github-autosync-settings`,
     settingsFolderMissing: false,
+    settingsFolderNote: null,
     others: [
-      { key: 'github.com/yaseenarshad/lab', name: 'lab', remoteUrl: 'https://github.com/yaseenarshad/lab.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/lab`, found: `${HOME}/Documents/GitHub/lab`, cloning: false, error: null, hidden: false, settings: { push: 15, pull: 5, paths: null, beforePush: null } },
-      { key: 'github.com/yaseenarshad/video-notes', name: 'video-notes', remoteUrl: 'https://github.com/yaseenarshad/video-notes.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/video-notes`, found: null, cloning: false, error: null, hidden: false, settings: { push: 15, pull: 5, paths: null, beforePush: null } },
+      { key: 'github.com/yaseenarshad/lab', name: 'lab', remoteUrl: 'https://github.com/yaseenarshad/lab.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/lab`, found: `${HOME}/Documents/GitHub/lab`, cloning: false, error: null, hidden: false, gone: false, settings: { push: 15, pull: 5, paths: null, beforePush: null } },
+      { key: 'github.com/yaseenarshad/video-notes', name: 'video-notes', remoteUrl: 'https://github.com/yaseenarshad/video-notes.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/video-notes`, found: null, cloning: false, error: null, hidden: false, gone: false, settings: { push: 15, pull: 5, paths: null, beforePush: null } },
     ],
     folders: [
       folder('team-skills', 'Documents/GitHub', {

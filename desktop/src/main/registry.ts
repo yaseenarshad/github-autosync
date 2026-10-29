@@ -181,6 +181,26 @@ export function settingsOf(config: Config, folder: FolderConfig): RepoSettings {
   return (key === null ? undefined : config.repos[key]?.settings) ?? DEFAULT_SETTINGS
 }
 
+/**
+ * D34: each folder's origin as a pass last read it. A repo renamed on GitHub (or moved to a new
+ * owner) gets a new key; its settings move with it, so nothing resets. Null when nothing changed.
+ */
+export function withLearnedRemotes(config: Config, seen: ReadonlyMap<string, string | null>): Config | null {
+  let repos = config.repos
+  let changed = false
+  const folders = config.folders.map((f) => {
+    const remote = seen.get(f.id) ?? null
+    if (remote === null || remote === f.remote) return f
+    changed = true
+    const before = keyOf(f)
+    const after = repoKey(remote)
+    const moving = before === null || before === after ? undefined : repos[before]
+    if (moving !== undefined && (repos[after]?.savedAt ?? -1) < moving.savedAt) repos = { ...repos, [after]: moving }
+    return { ...f, remote }
+  })
+  return changed ? { ...config, folders, repos } : null
+}
+
 /** D35: a change made on this computer is the newest, so it is stamped now. */
 export function withRepoSettings(config: Config, key: string, settings: RepoSettings, savedAt = Date.now()): Config {
   return { ...config, repos: { ...config.repos, [key]: { settings, savedAt } } }

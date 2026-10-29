@@ -528,7 +528,10 @@ export function createSyncManager(host: SyncHost): SyncManager {
     if (until === null) return
     e.wake = arm(until - Date.now(), () => {
       e.wake = null
-      if (current(e) && !e.active && e.cfg.enabled && !appPaused && pausedUntil(e.cfg) === null) activate(e)
+      if (!current(e)) return
+      // A timer can fire a millisecond early: then the pause has not ended yet, so wait again.
+      if (pausedUntil(e.cfg) !== null) return armWake(e)
+      if (!e.active && e.cfg.enabled && !appPaused) activate(e)
       host.onChange()
     })
   }

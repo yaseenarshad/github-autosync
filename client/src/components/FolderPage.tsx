@@ -300,6 +300,13 @@ function problemText(f: FolderStatus, a: Attention): { title: string; body: stri
     // no-git never gets here: the global banner covers it.
     case 'no-git':
     case 'error':
+      // Item 35: GitHub's "not found" means the repo was deleted, renamed, or this account lost access.
+      if (/repository not found|does not appear to be a git repository/i.test(a.detail ?? '')) {
+        return {
+          title: 'This repo is gone from GitHub (or you lost access)',
+          body: `GitHub says the repo isn't there. Maybe it was deleted or renamed, or this account lost access. Your files are safe on ${platform.here}. If it was renamed, update the folder's remote; otherwise remove it from AutoSync.`,
+        }
+      }
       return {
         title: 'Git stopped with an error',
         body: "AutoSync hit a problem it can't fix on its own. Your changes are safe here and will send once it's sorted.",

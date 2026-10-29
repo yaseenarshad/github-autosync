@@ -114,12 +114,21 @@ function OtherComputers({ others, home, onSheet }: { others: OtherRepo[]; home: 
           <div className="other" key={o.key}>
             <div className="min0">
               <div className="name">{o.name}</div>
-              <div className="sub" title={o.error ?? o.found ?? `On ${o.computers.join(', ')}`}>
-                {o.cloning ? 'Downloading…' : o.error !== null ? o.error : o.found !== null ? `Already on this ${platform.machine}` : `Not on this ${platform.machine} yet`}
+              <div className={`sub ${o.gone ? 'warn' : ''}`} title={o.error ?? o.found ?? `On ${o.computers.join(', ')}`}>
+                {o.gone && <Icon name="alert" />}
+                {o.cloning
+                  ? 'Downloading…'
+                  : o.gone
+                    ? 'Gone from GitHub'
+                    : o.error !== null
+                      ? o.error
+                      : o.found !== null
+                        ? `Already on this ${platform.machine}`
+                        : `Not on this ${platform.machine} yet`}
               </div>
             </div>
             <div className="acts">
-              {o.found !== null ? (
+              {o.gone ? null : o.found !== null ? (
                 <button className="btn" onClick={() => onSheet({ kind: 'add-other', key: o.key })}>
                   Sync…
                 </button>

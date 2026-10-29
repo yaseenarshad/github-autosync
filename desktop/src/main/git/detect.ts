@@ -100,6 +100,9 @@ export async function readWorking(bin: string, root: string): Promise<FileChange
   return out
 }
 
+/** Folders a `check-ignore` call names at most (D44): 200 long paths stay far below Windows' limit. */
+const CHECK_IGNORE_BATCH = 200
+
 /**
  * D44: the folder picker, one level at a time — the folders right under `rel` (`''` is the top),
  * without `.git` and without what git ignores, sorted. Repo-relative, `/`-separated.
@@ -110,8 +113,12 @@ export async function listSubfolders(bin: string, root: string, rel: string): Pr
   if (dirs.length === 0) return []
   // git sees these are folders, so a folder-only pattern (`node_modules/`) matches. Exit 1 just means
   // none is ignored. (`-z` needs `--stdin`, which `git()` does not feed; a folder name has no newline.)
-  const res = await git(bin, root, ['-c', 'core.quotePath=false', 'check-ignore', '--', ...dirs])
-  const ignored = new Set(res.code === 0 ? res.stdout.split('\n').filter((l) => l !== '') : [])
+  // In batches: a folder with thousands of subfolders would pass Windows' command-line limit (32k characters) in one call.
+  const ignored = new Set<string>()
+  for (let i = 0; i < dirs.length; i += CHECK_IGNORE_BATCH) {
+    const res = await git(bin, root, ['-c', 'core.quotePath=false', 'check-ignore', '--', ...dirs.slice(i, i + CHECK_IGNORE_BATCH)])
+    if (res.code === 0) for (const line of res.stdout.split('\n')) if (line !== '') ignored.add(line)
+  }
   return dirs.filter((d) => !ignored.has(d)).sort((a, b) => a.localeCompare(b))
 }
 

@@ -356,7 +356,7 @@ describe('sync settings (D34, D35)', () => {
   })
 
   it('lists the other computers’ repos: Sync…, Download…, and Not on this computer (D53, D54)', async () => {
-    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } }
+    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false, gone: false, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } }
     const others = [
       { ...other, key: 'github.com/me/lab', expectedPath: '/Users/yasin/GitHub/lab', found: '/Users/yasin/GitHub/lab' },
       { ...other, key: 'github.com/me/new', name: 'new', expectedPath: '/Users/yasin/GitHub/new', found: null },
@@ -405,6 +405,15 @@ describe('sync settings (D34, D35)', () => {
     expect(api.copyText).toHaveBeenCalledWith('/Users/yasin/Documents/GitHub/notes')
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     expect(document.querySelector('.popover')).toBeNull()
+  })
+
+  it('warns when the settings travel slowly, and marks a repo gone from GitHub (items 31, 35)', async () => {
+    const other = { key: 'k', name: 'dead', remoteUrl: 'https://github.com/me/dead.git', computers: ['Mac-Studio'], expectedPath: '/x', found: null, cloning: false, error: null, hidden: false, gone: true, settings: { push: 'auto' as const, pull: 1, paths: null, beforePush: null } }
+    await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/os/Sync', settingsFolderNote: 'The settings travel only every 1 hour, with the push of os.', others: [other] }))
+    expect(document.querySelector('.others')?.textContent).toContain('Gone from GitHub')
+    expect([...document.querySelectorAll('.others button')].map((b) => b.textContent)).not.toContain('Download…')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    expect(dialog()?.textContent).toContain('The settings travel only every 1 hour, with the push of os.')
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
