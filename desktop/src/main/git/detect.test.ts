@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
-import { checkFolder, otherApp, readConflicts, readIgnored, readPending, repoState, webUrlOf } from './detect'
+import { checkFolder, otherApp, readConflicts, readIgnored, readPending, repoKey, repoState, webUrlOf } from './detect'
 import { clone, makeBareRemote, makeGitRepo, pushedRepo, REAL_GIT_TIMEOUT_MS, requireGit, tempDir, wireOrigin, type GitRepo } from './gitFixture'
 
 // Real git throughout; the spy only lets one test fake GitHub's answer to `ls-remote`.
@@ -157,6 +157,15 @@ describe('readConflicts', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
       { original: 'a.md', copy: 'a (conflict Mac-B, 2026-09-27).md' },
       { original: 'docs/Plan.txt', copy: 'docs/Plan (conflict Mac-A, 2026-09-27 2).txt' },
     ])
+  })
+})
+
+describe('repoKey (D34)', () => {
+  it('gives every spelling of a GitHub origin one lower-case key, and any other origin its own', () => {
+    for (const url of ['https://github.com/Acme/Lab.git', 'git@github.com:acme/lab.git', 'ssh://git@github.com/ACME/lab', 'https://token@github.com/acme/Lab/']) {
+      expect(repoKey(url)).toBe('github.com/acme/lab')
+    }
+    expect(repoKey(' /srv/git/lab.git ')).toBe('/srv/git/lab.git')
   })
 })
 

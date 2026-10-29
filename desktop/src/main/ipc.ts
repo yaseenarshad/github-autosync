@@ -9,7 +9,7 @@ import { folderMenuTemplate } from './folderMenu'
 import { checkFolder } from './git/detect'
 import { readActivity } from './git/activity'
 import type { SyncManager } from './git/manager'
-import { newFolder, withAlias, type Config, type Registry } from './registry'
+import { newFolder, withAlias, withRepoSettings, type Config, type Registry } from './registry'
 
 /**
  * `shared/api.ts`, implemented. Mutations go through the registry, then `apply` hands the new
@@ -86,6 +86,16 @@ export function registerIpc(deps: IpcDeps): void {
     activity: async (id, cursor) => readActivity(folderPath(id), deps.status().hostname, cursor),
     setLaunchAtLogin: async (on) => change((c) => ({ ...c, launchAtLogin: on })),
     setTheme: async (theme) => change((c) => ({ ...c, theme })),
+    setRepoSettings: async (id, settings) => {
+      const repo = deps.status().folders.find((f) => f.id === id)?.repo ?? null
+      if (repo === null) throw new Error(`The origin of folder ${id} is not known yet`)
+      return change((c) => withRepoSettings(c, repo, settings))
+    },
+    pickSettingsFolder: async () => {
+      const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], message: 'Choose a folder that git syncs to every computer' })
+      return picked.canceled ? null : (picked.filePaths[0] ?? null)
+    },
+    setSettingsFolder: async (path) => change((c) => ({ ...c, settingsFolder: path })),
     showInFinder: async (id) => {
       const failure = await shell.openPath(folderPath(id))
       if (failure !== '') throw new Error(failure)

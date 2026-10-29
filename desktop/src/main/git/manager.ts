@@ -1,8 +1,8 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.ts; changes: folders from the registry instead of vault configs, pause, AutoSync FolderStatus, sendAt/retryAt, a pending-list peek, follow-up keeps the strongest mode, PR mode (D24, D26).
 import path from 'node:path'
-import { DEBOUNCE_MS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
-import type { Attention, AttentionKind, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, SyncState, TooBigFile } from '@shared/types'
-import { webUrlOf } from './detect'
+import { DEBOUNCE_MS, DEFAULT_SETTINGS, OFFLINE_RETRY_MS, OWN_WRITES_MS, PEEK_MS, POLL_MS, PR_CHECK_MS, PR_QUIET_MS, WAKE_COOLDOWN_MS } from '@shared/status'
+import type { Attention, AttentionKind, FileChange, FolderStatus, OtherApp, PublishVia, PullRequestRef, RepoSettings, SyncState, TooBigFile } from '@shared/types'
+import { repoKey, webUrlOf } from './detect'
 import type { RepoPolicy } from './github'
 import type { PassResult } from './sync'
 
@@ -51,6 +51,12 @@ export interface FolderConfig {
   enabled: boolean
   /** D18 nickname, shown instead of the folder's own name; absent when there is none. */
   alias?: string
+  /** D34: `origin` as last seen — the folder's settings key comes from it. */
+  remote?: string
+  /** D51: off until this time (ms epoch), then on again with a pass. */
+  pausedUntil?: number
+  /** D34: the repo's settings, handed in by the app on every `setFolders`; never stored with the folder. */
+  settings?: RepoSettings
 }
 
 type PassMode = 'quiet' | 'normal' | 'flush'
@@ -185,6 +191,8 @@ function stateOf(e: Entry): SyncState {
   return 'synced'
 }
 
+const settingsOf = (e: Entry): RepoSettings => e.cfg.settings ?? DEFAULT_SETTINGS
+
 /** D22/D29: PR mode is the rules' call, and only on the branch they govern. */
 const publishVia = (e: Entry): PublishVia => (e.policy?.requiresPr === true && e.branch === e.policy.defaultBranch ? 'pr' : 'push')
 
@@ -201,6 +209,8 @@ function toStatus(e: Entry): FolderStatus {
     branch: e.branch,
     remoteUrl: e.remoteUrl,
     webUrl: webUrlOf(e.remoteUrl),
+    repo: e.remoteUrl !== null ? repoKey(e.remoteUrl) : e.cfg.remote !== undefined ? repoKey(e.cfg.remote) : null,
+    settings: settingsOf(e),
     publishVia: publishVia(e),
     pr: e.pr,
     pending: e.pending,

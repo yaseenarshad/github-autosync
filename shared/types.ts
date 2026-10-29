@@ -51,6 +51,21 @@ export interface PullRequestRef {
   url: string
 }
 
+/** D37: when a repo's changes are pushed — `auto` (30 s after the last edit, as D3), every N minutes, or only by hand. */
+export type PushEvery = 'auto' | 'manual' | number
+/** D39: how often a repo pulls — every N minutes, or only by hand. */
+export type PullEvery = 'manual' | number
+
+/** D34: one repo's settings. They travel between computers through the settings folder (D35). */
+export interface RepoSettings {
+  push: PushEvery
+  pull: PullEvery
+  /** D44: repo-relative folders to sync; null is the whole repo. */
+  paths: string[] | null
+  /** D49: a command run in the repo root before each send; null is none. */
+  beforePush: string | null
+}
+
 export interface FolderStatus {
   id: string
   /** Absolute path on this computer. */
@@ -69,6 +84,9 @@ export interface FolderStatus {
   remoteUrl: string | null
   /** `https://github.com/<owner>/<repo>` when origin is GitHub, else null. */
   webUrl: string | null
+  /** D34: the key its settings travel under (`github.com/<owner>/<repo>`); null until origin is known. */
+  repo: string | null
+  settings: RepoSettings
   /** `push` until the repo's rules are known to require PRs on this branch (D22). */
   publishVia: PublishVia
   /** Set while a batch's PR is open: the folder is `pending` until it merges (D26). */
@@ -103,6 +121,10 @@ export interface AppStatus {
   launchAtLogin: boolean
   /** D19: `system` follows macOS/Windows; `light`/`dark` force the window's look. */
   theme: ThemeChoice
+  /** D35: the folder the settings travel through; null when none is chosen. */
+  settingsFolder: string | null
+  /** The chosen settings folder cannot be read or written right now; this computer keeps its own copy. */
+  settingsFolderMissing: boolean
 }
 
 export type ThemeChoice = 'system' | 'light' | 'dark'

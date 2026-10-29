@@ -126,6 +126,15 @@ export function webUrlOf(remoteUrl: string | null): string | null {
   return m === null ? null : `https://github.com/${m[1]}/${m[2]}`
 }
 
+/**
+ * D34: the key a repo's settings travel under. Every spelling of a GitHub origin gives the same
+ * `github.com/<owner>/<repo>` (lower case: GitHub ignores case); any other origin is its own key.
+ */
+export function repoKey(remoteUrl: string): string {
+  const web = webUrlOf(remoteUrl)
+  return web === null ? remoteUrl.trim() : web.slice('https://'.length).toLowerCase()
+}
+
 /** D27: the Docs and Draw apps keep their own per-folder GitHub switch; while it is on a pass stands back (zero writes) and add-folder warns. */
 const OTHER_APPS: ReadonlyArray<[OtherApp, string]> = [
   ['Docs', '.yaseendocs/github.json'],

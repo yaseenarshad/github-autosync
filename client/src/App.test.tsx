@@ -30,6 +30,9 @@ function mockApi(status: AppStatus) {
     activity: vi.fn(async (): Promise<ActivityPage> => ({ entries: [], cursor: null })),
     setLaunchAtLogin: vi.fn(),
     setTheme: vi.fn(async () => status),
+    setRepoSettings: vi.fn(async () => status),
+    pickSettingsFolder: vi.fn(async (): Promise<string | null> => null),
+    setSettingsFolder: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -261,6 +264,40 @@ describe('theme (D19)', () => {
     await click(radio('Dark') as HTMLButtonElement)
 
     expect(api.setTheme).toHaveBeenCalledWith('dark')
+  })
+})
+
+describe('sync settings (D34, D35)', () => {
+  async function change(select: HTMLSelectElement, value: string) {
+    await act(async () => {
+      select.value = value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
+  it('the folder page changes its repo push and pull, keeping the other fields', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await change(document.querySelector('select[aria-label="Push"]')!, '60')
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 60, pull: 1, paths: null, beforePush: null })
+    await change(document.querySelector('select[aria-label="Pull"]')!, 'manual')
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 'manual', paths: null, beforePush: null })
+  })
+
+  it('waits for the first sync before a folder with an unknown repo can change them', async () => {
+    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', repo: null })]))
+    await click(button('notes'))
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Push"]')!.disabled).toBe(true)
+  })
+
+  it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
+    const api = await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/Sync/autosync' }))
+    api.pickSettingsFolder.mockResolvedValue('/Users/yasin/Sync/other')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    await click(button('Choose…'))
+    expect(api.setSettingsFolder).toHaveBeenCalledWith('/Users/yasin/Sync/other')
+    await click(button('Stop sharing'))
+    expect(api.setSettingsFolder).toHaveBeenLastCalledWith(null)
   })
 })
 

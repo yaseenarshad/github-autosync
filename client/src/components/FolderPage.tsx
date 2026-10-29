@@ -9,6 +9,7 @@ import { ActivityLog } from './ActivityLog'
 import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
+import { SyncSettings } from './SyncSettings'
 import { Countdown, LastSynced } from './Time'
 
 interface Props {
@@ -88,6 +89,7 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
       {f.tooBig.length > 0 && f.enabled && <TooBigCard folder={f} />}
 
       <NotSyncing folder={f} view={v} paused={status.paused} />
+      <SyncSettings folder={f} status={status} />
       <ActivityLog key={f.id} folder={f} />
 
       <div className="section">

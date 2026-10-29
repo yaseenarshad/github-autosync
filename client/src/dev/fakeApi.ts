@@ -1,6 +1,7 @@
 // Browser-only stand-in for the preload API (plain `vite`, no Electron), seeded like the approved demo.
 // Loaded lazily by main.tsx only when `window.autosync` is missing.
 import type { AutoSyncApi } from '@shared/api'
+import { DEFAULT_SETTINGS } from '@shared/status'
 import type { ActivityEntry, AppStatus, FileChange, FolderStatus, FolderVerdict } from '@shared/types'
 
 const HOST = 'MacBook-Pro'
@@ -23,6 +24,8 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     branch: 'main',
     remoteUrl: `https://github.com/yaseenarshad/${name}.git`,
     webUrl: `https://github.com/yaseenarshad/${name}`,
+    repo: `github.com/yaseenarshad/${name}`,
+    settings: DEFAULT_SETTINGS,
     publishVia: 'push',
     pr: null,
     pending: [],
@@ -88,6 +91,8 @@ export function createFakeApi(): AutoSyncApi {
     gitMissing: false,
     launchAtLogin: true,
     theme: 'system',
+    settingsFolder: null,
+    settingsFolderMissing: false,
     folders: [
       folder('team-skills', 'Documents/GitHub', {
         state: 'attention',
@@ -230,6 +235,9 @@ export function createFakeApi(): AutoSyncApi {
     setLaunchAtLogin: (on) => set({ ...status, launchAtLogin: on }),
     // The CSS follows prefers-color-scheme, which only Electron's themeSource can move: the browser preview just records it.
     setTheme: (theme) => set({ ...status, theme }),
+    setRepoSettings: (id, settings) => patch(id, { settings }),
+    pickSettingsFolder: () => Promise.resolve(window.prompt('Settings folder (fake picker)', `${HOME}/Documents/GitHub/yaseen-os/Sync/github-autosync-settings`)),
+    setSettingsFolder: (settingsFolder) => set({ ...status, settingsFolder }),
     showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
     // Fake ids are the folder names.
     setAlias: (id, alias) => patch(id, { alias, name: alias ?? id }),

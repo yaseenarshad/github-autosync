@@ -392,6 +392,14 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
   background: var(--input); border: 1px solid var(--btn-border); border-radius: var(--radius); outline: 0;
 }
 .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(33, 136, 255, .25); }
+.select {
+  height: 28px; padding: 0 6px; font: inherit; font-size: 12.5px; color: var(--text); flex: none; min-width: 210px;
+  background: var(--input); border: 1px solid var(--btn-border); border-radius: var(--radius); outline: 0;
+}
+.select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(33, 136, 255, .25); }
+.select:disabled { opacity: .55; }
+.set .acts, .action .acts { display: flex; gap: 6px; flex: none; }
+.d.warn { color: var(--warn); }
 
 @media (max-width: 900px) {
   .body { grid-template-columns: 220px 1fr; }

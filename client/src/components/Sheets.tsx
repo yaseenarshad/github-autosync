@@ -124,18 +124,47 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
       >
         <span className="mono">{status.hostname}</span>
       </Setting>
-      <Setting title="When it syncs" detail={`Sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit.`} />
+      <SettingsFolderRow status={status} />
+      <Setting title="When it syncs" detail={`By default: sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit. Each folder can change this.`} />
       <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
     </Sheet>
   )
 }
 
-function Setting({ title, detail, children }: { title: string; detail: string; children?: ReactNode }) {
+/** D35: where the settings travel. Each computer writes only its own file there. */
+function SettingsFolderRow({ status }: { status: AppStatus }) {
+  const api = window.autosync
+  const detail = status.settingsFolder === null
+    ? `Not set: each folder's settings stay on ${platform.here}. Pick a folder that git syncs to share them with your other computers.`
+    : status.settingsFolderMissing
+      ? `Can't find ${status.settingsFolder}. AutoSync keeps its own copy until it's back.`
+      : `${status.settingsFolder} · each computer writes its own file here`
+  async function choose() {
+    const picked = await api.pickSettingsFolder()
+    if (picked !== null) await api.setSettingsFolder(picked)
+  }
+  return (
+    <Setting title="Settings folder" detail={detail} warn={status.settingsFolderMissing}>
+      <div className="acts">
+        <button className="btn" onClick={choose}>
+          Choose…
+        </button>
+        {status.settingsFolder !== null && (
+          <button className="btn" onClick={() => api.setSettingsFolder(null)}>
+            Stop sharing
+          </button>
+        )}
+      </div>
+    </Setting>
+  )
+}
+
+function Setting({ title, detail, children, warn }: { title: string; detail: string; children?: ReactNode; warn?: boolean }) {
   return (
     <div className="set">
       <div className="grow">
         <div className="t">{title}</div>
-        <div className="d">{detail}</div>
+        <div className={`d${warn ? ' warn' : ''}`}>{detail}</div>
       </div>
       {children}
     </div>

@@ -1,4 +1,4 @@
-import type { AppStatus, FolderStatus, SyncState } from './types'
+import type { AppStatus, FolderStatus, PullEvery, PushEvery, RepoSettings, SyncState } from './types'
 
 /**
  * Status rules the window and the menu bar must agree on: the cadence, which state is worst, the
@@ -28,6 +28,22 @@ export const OWN_WRITES_MS = 1_000
 export const SENDS_AFTER = `${DEBOUNCE_MS / 1000}s after you stop editing`
 export const OPENS_PR_AFTER = `${PR_QUIET_MS / 60_000} minutes after you stop editing`
 export const CHECKS_EVERY = POLL_MS === 60_000 ? 'every minute' : `every ${POLL_MS / 1000}s`
+
+// ---------- per-repo settings (D34, D37, D39) ----------
+
+/** A repo nobody has set up yet behaves exactly as before: send 30 s after edits, pull every minute, the whole repo. */
+export const DEFAULT_SETTINGS: RepoSettings = { push: 'auto', pull: 1, paths: null, beforePush: null }
+
+/** The push choices the window offers, in order (D37). Minutes in between. */
+export const PUSH_CHOICES: readonly PushEvery[] = ['auto', 5, 15, 30, 60, 240, 'manual']
+/** The pull choices the window offers, in order (D39). */
+export const PULL_CHOICES: readonly PullEvery[] = [1, 5, 15, 60, 'manual']
+
+/** `5 min`, `1 hour`, `4 hours`. */
+export const minutesLabel = (m: number): string => (m % 60 === 0 ? plural(m / 60, 'hour') : `${m} min`)
+
+export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after you stop editing)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
+export const pullLabel = (p: PullEvery): string => (p === 'manual' ? 'By hand only' : p === 1 ? 'Every minute' : `Every ${minutesLabel(p)}`)
 
 // ---------- links ----------
 

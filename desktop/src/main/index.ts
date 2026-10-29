@@ -3,12 +3,13 @@ import { join } from 'node:path'
 import type { AppStatus, NavTarget } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
 import { findGit } from './git/exec'
-import { createSyncManager } from './git/manager'
+import { createSyncManager, type FolderConfig } from './git/manager'
 import { forgetInFlight } from './git/pullRequest'
 import { hostName, peekPending, syncFolder } from './git/sync'
 import { registerIpc, throttle } from './ipc'
 import { createNoticeRules, type Notice } from './notify'
-import { createRegistry } from './registry'
+import { createRegistry, settingsOf } from './registry'
+import { followSettingsFolder, type SettingsFolder } from './settingsFolder'
 import { createTray } from './tray'
 import { watchFolder } from './watch'
 
@@ -39,8 +40,38 @@ const manager = createSyncManager({
   peek: (root) => peekPending(root),
   forgetInFlight,
   watch: watchFolder,
-  onChange: () => refresh(),
+  onChange: () => {
+    learnRemotes()
+    refresh()
+  },
 })
+
+/** D35: started with the app (a second instance must never touch it); see `whenReady`. */
+let settingsFolder: SettingsFolder | undefined
+
+/** The manager runs each folder with its repo's settings (D34). */
+function runFolders(): void {
+  const config = registry.get()
+  manager.setFolders(
+    config.folders.map((f) => ({ ...f, settings: settingsOf(config, f) })),
+    config.paused,
+  )
+}
+
+/**
+ * D34: a folder's settings key comes from its origin. A pass reads origin, so a folder added before
+ * D34 (or whose origin changed) gets it stored here, and its repo's settings apply.
+ */
+function learnRemotes(): void {
+  const seen = new Map(manager.folders().map((f) => [f.id, f.remoteUrl]))
+  const learned = (f: FolderConfig): string | null => {
+    const remote = seen.get(f.id) ?? null
+    return remote !== null && remote !== f.remote ? remote : null
+  }
+  if (!registry.get().folders.some((f) => learned(f) !== null)) return
+  registry.update((c) => ({ ...c, folders: c.folders.map((f) => ({ ...f, remote: learned(f) ?? f.remote })) }))
+  apply()
+}
 
 function createWindow(): BrowserWindow {
   const created = new BrowserWindow({
@@ -89,7 +120,16 @@ function navigate(target: NavTarget): void {
 function status(): AppStatus {
   const config = registry.get()
   const folders = manager.folders()
-  return { folders, paused: config.paused, gitMissing: gitMissing || folders.some((f) => f.attention?.kind === 'no-git'), hostname: HOST, launchAtLogin: config.launchAtLogin, theme: config.theme }
+  return {
+    folders,
+    paused: config.paused,
+    gitMissing: gitMissing || folders.some((f) => f.attention?.kind === 'no-git'),
+    hostname: HOST,
+    launchAtLogin: config.launchAtLogin,
+    theme: config.theme,
+    settingsFolder: config.settingsFolder,
+    settingsFolderMissing: settingsFolder?.missing() ?? false,
+  }
 }
 
 async function probeGit(): Promise<void> {
@@ -124,7 +164,8 @@ const refresh = throttle(() => {
 
 function apply(): void {
   const config = registry.get()
-  manager.setFolders(config.folders, config.paused)
+  runFolders()
+  settingsFolder?.changed()
   // D19: the renderer's CSS follows `prefers-color-scheme`, which follows this — nothing else to tell it.
   nativeTheme.themeSource = config.theme
   // A dev build would register the Electron binary itself as a login item.
@@ -171,6 +212,14 @@ void app.whenReady().then(() => {
     syncAll: () => void manager.syncNow(null),
     quit: () => app.quit(),
   })
+  // D35: settings taken from another computer apply at once.
+  settingsFolder = followSettingsFolder(registry, {
+    host: HOST,
+    onChange: () => {
+      runFolders()
+      refresh()
+    },
+  })
   apply() // D3: app start is a pass per enabled folder
   // D3: a lid that just opened is when the other computer's changes are most likely waiting.
   powerMonitor.on('resume', () => manager.notifyWake())
@@ -195,5 +244,5 @@ app.on('before-quit', (event) => {
   if (quitting) return
   quitting = true
   const cap = new Promise<void>((resolve) => setTimeout(resolve, QUIT_CAP_MS))
-  void Promise.race([manager.flushForQuit(), cap]).finally(() => app.exit(0))
+  void Promise.race([Promise.all([manager.flushForQuit(), settingsFolder?.flush()]), cap]).finally(() => app.exit(0))
 })

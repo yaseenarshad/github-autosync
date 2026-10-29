@@ -1,4 +1,4 @@
-import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, ThemeChoice } from './types'
+import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, RepoSettings, ThemeChoice } from './types'
 
 /**
  * Everything the renderer can ask of the main process, exposed by the preload as `window.autosync`.
@@ -27,6 +27,12 @@ export interface AutoSyncApi {
   activity(id: string, cursor?: number): Promise<ActivityPage>
   setLaunchAtLogin(on: boolean): Promise<AppStatus>
   setTheme(theme: ThemeChoice): Promise<AppStatus>
+  /** D34: the folder's repo gets these settings, on every computer (D35). Throws while its origin is unknown. */
+  setRepoSettings(id: string, settings: RepoSettings): Promise<AppStatus>
+  /** D35: the native picker for the settings folder; null when cancelled. */
+  pickSettingsFolder(): Promise<string | null>
+  /** D35: null stops sharing; this computer keeps its own copy. */
+  setSettingsFolder(path: string | null): Promise<AppStatus>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */
