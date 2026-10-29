@@ -1,6 +1,6 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/detect.ts; changes: rewritten around AutoSync's reads (busy repo, pending, ignored, conflict copies, web URL, Docs/Draw marker, add-folder check).
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ConflictPair, FileChange, FileStatus, FolderVerdict, OtherApp } from '@shared/types'
 import { classifyGitFailure, findGit, git, zList } from './exec'
@@ -72,19 +72,54 @@ export function parseNameStatus(tokens: readonly string[]): FileChange[] {
  * path both mention — it is what the user did last.
  */
 export async function readPending(bin: string, root: string): Promise<FileChange[]> {
-  const out = new Map<string, FileStatus>()
-  const tokens = zList(await git(bin, root, ['status', '--porcelain', '-z', '-uall']))
-  for (let i = 0; i < tokens.length; i += 1) {
-    const entry = tokens[i] ?? ''
-    const xy = entry.slice(0, 2)
-    out.set(entry.slice(3), porcelainStatus(xy))
-    if (xy.includes('R') || xy.includes('C')) i += 1 // `-z` puts the rename's old path in the next token
-  }
+  const out = new Map<string, FileStatus>((await readWorking(bin, root)).map((c) => [c.path, c.status]))
   // Fails without an upstream (never pushed): then there is nothing to compare against.
   for (const change of parseNameStatus(zList(await git(bin, root, ['diff', '--name-status', '-z', '@{u}..HEAD'])))) {
     if (!out.has(change.path)) out.set(change.path, change.status)
   }
   return [...out].map(([p, status]) => ({ status, path: p }))
+}
+
+/**
+ * D48: databases that are open right now. SQLite keeps `<name>-wal` or `<name>-journal` beside a
+ * database while it is in use, and the new data lives there: the file alone is old data.
+ */
+export const inUseOf = (root: string, rels: readonly string[]): string[] =>
+  rels.filter((rel) => existsSync(path.join(root, `${rel}-wal`)) || existsSync(path.join(root, `${rel}-journal`)))
+
+/** The working tree's changes alone (staged or not, tracked or new), one entry per file. */
+export async function readWorking(bin: string, root: string): Promise<FileChange[]> {
+  const out: FileChange[] = []
+  const tokens = zList(await git(bin, root, ['status', '--porcelain', '-z', '-uall']))
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i] ?? ''
+    const xy = entry.slice(0, 2)
+    out.push({ status: porcelainStatus(xy), path: entry.slice(3) })
+    if (xy.includes('R') || xy.includes('C')) i += 1 // `-z` puts the rename's old path in the next token
+  }
+  return out
+}
+
+/** Folders a `check-ignore` call names at most (D44): 200 long paths stay far below Windows' limit. */
+const CHECK_IGNORE_BATCH = 200
+
+/**
+ * D44: the folder picker, one level at a time — the folders right under `rel` (`''` is the top),
+ * without `.git` and without what git ignores, sorted. Repo-relative, `/`-separated.
+ */
+export async function listSubfolders(bin: string, root: string, rel: string): Promise<string[]> {
+  const entries = await readdir(rel === '' ? root : path.join(root, ...rel.split('/')), { withFileTypes: true })
+  const dirs = entries.filter((d) => d.isDirectory() && d.name !== '.git').map((d) => (rel === '' ? d.name : `${rel}/${d.name}`))
+  if (dirs.length === 0) return []
+  // git sees these are folders, so a folder-only pattern (`node_modules/`) matches. Exit 1 just means
+  // none is ignored. (`-z` needs `--stdin`, which `git()` does not feed; a folder name has no newline.)
+  // In batches: a folder with thousands of subfolders would pass Windows' command-line limit (32k characters) in one call.
+  const ignored = new Set<string>()
+  for (let i = 0; i < dirs.length; i += CHECK_IGNORE_BATCH) {
+    const res = await git(bin, root, ['-c', 'core.quotePath=false', 'check-ignore', '--', ...dirs.slice(i, i + CHECK_IGNORE_BATCH)])
+    if (res.code === 0) for (const line of res.stdout.split('\n')) if (line !== '') ignored.add(line)
+  }
+  return dirs.filter((d) => !ignored.has(d)).sort((a, b) => a.localeCompare(b))
 }
 
 /** How many `.gitignore` patterns the UI lists before it stops. */
@@ -124,6 +159,15 @@ export async function readConflicts(bin: string, root: string): Promise<Conflict
 export function webUrlOf(remoteUrl: string | null): string | null {
   const m = /^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(remoteUrl ?? '')
   return m === null ? null : `https://github.com/${m[1]}/${m[2]}`
+}
+
+/**
+ * D34: the key a repo's settings travel under. Every spelling of a GitHub origin gives the same
+ * `github.com/<owner>/<repo>` (lower case: GitHub ignores case); any other origin is its own key.
+ */
+export function repoKey(remoteUrl: string): string {
+  const web = webUrlOf(remoteUrl)
+  return web === null ? remoteUrl.trim() : web.slice('https://'.length).toLowerCase()
 }
 
 /** D27: the Docs and Draw apps keep their own per-folder GitHub switch; while it is on a pass stands back (zero writes) and add-folder warns. */

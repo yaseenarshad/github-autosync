@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
-import { CHECKS_EVERY, isGitHubUrl, OPENS_PR_AFTER, plural, SENDS_AFTER } from '@shared/status'
-import { formatBytes, tildify, webLabel } from '../lib/format'
+import { checksEvery, clock, isGitHubUrl, OPENS_PR_AFTER, PAUSES, plural, SENDS_AFTER } from '@shared/status'
+import { formatBytes, repoLabel, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
 import { folderView, type FolderView } from '../lib/summary'
@@ -9,18 +9,20 @@ import { ActivityLog } from './ActivityLog'
 import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
-import { Countdown, LastSynced } from './Time'
+import { Fold } from './Fold'
+import { FolderInfo } from './FolderInfo'
+import { SyncSettings } from './SyncSettings'
+import { Ago, Countdown, LastSynced } from './Time'
 
 interface Props {
   folder: FolderStatus
   status: AppStatus
-  home: string | null
   onSheet: (sheet: SheetState) => void
 }
 
-export function FolderPage({ folder: f, status, home, onSheet }: Props) {
+export function FolderPage({ folder: f, status, onSheet }: Props) {
   const v = folderView(f, status)
-  const active = f.enabled && !status.paused
+  const active = f.enabled && !status.paused && f.pausedUntil === null
   const problem = f.attention && f.attention.kind !== 'no-git' && active && !status.gitMissing ? f.attention : null
   const api = window.autosync
 
@@ -28,19 +30,35 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
     <>
       <div className="head">
         <div className="grow">
-          <h1>{f.name}</h1>
-          <div className="path">{tildify(f.path, home)}</div>
-          <div className="pills">
-            <span className="pill">
-              <Icon name="branch" />
-              {f.branch ?? 'No branch'} ⇄ origin
-            </span>
-            {(f.webUrl || f.remoteUrl) && (
-              <span className="pill">
-                <Icon name="ext" />
-                {f.webUrl ? webLabel(f.webUrl) : f.remoteUrl}
+          <div className="title-row">
+            <h1>{f.name}</h1>
+            {/* The folder's state, as one quiet line beside its name: no card unless something needs the user. */}
+            {/* A few words: when it last synced, and what happens next (the next push or the next check). */}
+            <div className={`status ${v.cls}`}>
+              <span className="big">
+                <Icon name={v.icon} />
               </span>
-            )}
+              <span className="h">{v.kind === 'synced' && f.lastSyncedAt !== null ? <>Synced <Ago at={f.lastSyncedAt} /></> : v.head}</span>
+              <span className="s">
+                <StatusSub folder={f} view={v} />
+              </span>
+            </div>
+          </div>
+          {/* Only the repo, as GitHub Desktop and Fork show it. The folder's place is in the sidebar group and Reveal in Finder; the branch is in the toolbar. */}
+          {(f.webUrl || f.remoteUrl) && (
+            <div className="meta">
+              {f.webUrl ? (
+                <button className="link one" onClick={() => api.openExternal(f.webUrl!)}>
+                  {repoLabel(f.webUrl)}
+                  <Icon name="ext" />
+                </button>
+              ) : (
+                <span className="one">{repoLabel(f.remoteUrl ?? '')}</span>
+              )}
+              <FolderInfo folder={f} />
+            </div>
+          )}
+          <div className="pills">
             {f.publishVia === 'pr' && (
               <span className="pill">
                 <Icon name="up" />
@@ -55,39 +73,36 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
             )}
           </div>
         </div>
-        <button
-          className={`switch ${f.enabled ? 'on' : ''}`}
-          role="switch"
-          aria-checked={f.enabled}
-          onClick={() => onSheet({ kind: f.enabled ? 'folder-off' : 'folder-on', id: f.id })}
-        >
-          <span>{f.enabled ? 'Syncing' : 'Sync off'}</span>
-          <span className="track" />
-        </button>
-      </div>
-
-      <div className={`status ${v.cls}`}>
-        <div className="big">
-          <Icon name={v.icon} />
-        </div>
-        <div className="grow">
-          <div className="h">{v.head}</div>
-          <div className="s">
-            <StatusSub folder={f} view={v} />
-          </div>
-        </div>
-        {active && !status.gitMissing && v.cls !== 'syncing' && (
-          <button className="btn" onClick={() => api.syncNow(f.id)}>
-            <Icon name="sync" />
-            Sync now
+        <div className="head-acts">
+          {v.kind === 'paused-until' && (
+            <button className="btn" onClick={() => api.pauseFolder(f.id, null)}>
+              <Icon name="sync" />
+              Resume now
+            </button>
+          )}
+          {active && !status.gitMissing && v.cls !== 'syncing' && (
+            <button className="btn" onClick={() => api.syncNow(f.id)}>
+              <Icon name={pushesLater(f) ? 'up' : 'sync'} />
+              {pushesLater(f) ? 'Push now' : 'Sync now'}
+            </button>
+          )}
+          <button
+            className={`switch ${f.enabled ? 'on' : ''}`}
+            role="switch"
+            aria-checked={f.enabled}
+            onClick={() => onSheet({ kind: f.enabled ? 'folder-off' : 'folder-on', id: f.id })}
+          >
+            <span>{f.enabled ? 'Syncing' : 'Sync off'}</span>
+            <span className="track" />
           </button>
-        )}
+        </div>
       </div>
 
       {problem && <ProblemCard folder={f} attention={problem} />}
       {f.tooBig.length > 0 && f.enabled && <TooBigCard folder={f} />}
 
-      <NotSyncing folder={f} view={v} paused={status.paused} />
+      <NotSyncing folder={f} view={v} paused={status.paused} onSheet={onSheet} />
+      <SyncSettings folder={f} status={status} onSheet={onSheet} />
       <ActivityLog key={f.id} folder={f} />
 
       <div className="section">
@@ -104,6 +119,17 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
               </button>
             </Action>
           )}
+          {active && (
+            <Action title="Pause this folder for a while" detail="It turns back on by itself, and catches up right away.">
+              <div className="acts">
+                {PAUSES.map(([minutes, label]) => (
+                  <button className="btn" key={minutes} onClick={() => api.pauseFolder(f.id, minutes)}>
+                    {label.replace('Pause for ', '')}
+                  </button>
+                ))}
+              </div>
+            </Action>
+          )}
           <Action title="Stop syncing this folder" detail={`Removes it from AutoSync only. Files stay on ${platform.yours} and on GitHub.`}>
             <button className="btn red" onClick={() => onSheet({ kind: 'remove', id: f.id })}>
               <Icon name="trash" />
@@ -116,12 +142,28 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
   )
 }
 
+/** D52: changes wait for a timer or for the user, so the button sends them now. */
+const pushesLater = (f: FolderStatus): boolean => f.pending.length > 0 && f.settings.push !== 'auto'
+
+/** " · next check in 3:12" while a pull is armed on a repo that does not send at once (D52). */
+function NextCheck({ folder: f }: { folder: FolderStatus }) {
+  if (f.pullAt === null || f.settings.push === 'auto') return null
+  return (
+    <>
+      {' '}
+      · next check in <Countdown at={f.pullAt} />
+    </>
+  )
+}
+
 function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView }) {
   switch (view.kind) {
     case 'off':
       return <>Nothing is committed, pulled, or pushed. Turn it on to start again.</>
     case 'paused':
       return <>All folders are paused. Resume to catch up.</>
+    case 'paused-until':
+      return <>Nothing is committed, pulled, or pushed until then. It turns back on by itself.</>
     case 'git-missing':
       return <>AutoSync needs git to do anything. See the banner above.</>
     case 'attention':
@@ -154,7 +196,23 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
           </>
         )
       }
+      if (f.settings.push === 'manual') {
+        return (
+          <>
+            You push this repo by hand — press Push now to send
+            <NextCheck folder={f} />
+          </>
+        )
+      }
       if (f.sendAt === null) return <>Waiting for the next pass.</>
+      if (f.settings.push !== 'auto') {
+        return (
+          <>
+            {f.publishVia === 'pr' ? 'Opens a PR' : 'Sends'} at {clock(f.sendAt)} (in <Countdown at={f.sendAt} />)
+            <NextCheck folder={f} />
+          </>
+        )
+      }
       return f.publishVia === 'pr' ? (
         <>
           Opens a PR in <Countdown at={f.sendAt} /> — {OPENS_PR_AFTER}.
@@ -165,15 +223,17 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
         </>
       )
     case 'synced':
-      return (
+      return f.pullAt !== null ? (
         <>
-          <LastSynced at={f.lastSyncedAt} /> · checks GitHub {CHECKS_EVERY}
+          next check in <Countdown at={f.pullAt} />
         </>
+      ) : (
+        <>checks GitHub {checksEvery(f.settings.pull)}</>
       )
   }
 }
 
-function problemText(a: Attention): { title: string; body: string } {
+function problemText(f: FolderStatus, a: Attention): { title: string; body: string } {
   switch (a.kind) {
     case 'conflict': {
       const n = a.conflicts?.length ?? 0
@@ -225,9 +285,28 @@ function problemText(a: Attention): { title: string; body: string } {
         body: `One folder, one syncer: AutoSync is standing back and changing nothing until one of them is off. Turn off GitHub sync for this folder in the ${app} app, or turn this folder off here.`,
       }
     }
+    case 'before-push':
+      return {
+        title: 'The command before each push failed',
+        body: `AutoSync runs “${f.settings.beforePush ?? ''}” before it pushes this folder. It stopped with an error, so nothing was committed or pushed. Your changes are safe on ${platform.here}.`,
+      }
+    case 'outside-changed': {
+      const n = a.files?.length ?? 0
+      return {
+        title: `${plural(n, 'file')} that AutoSync holds back changed here and on GitHub`,
+        body: `They are outside the folders you picked, or an open database. AutoSync stopped before pulling, so neither version is lost, and it won't overwrite either side. Settle them by hand, then check again.`,
+      }
+    }
     // no-git never gets here: the global banner covers it.
     case 'no-git':
     case 'error':
+      // Item 35: GitHub's "not found" means the repo was deleted, renamed, or this account lost access.
+      if (/repository not found|does not appear to be a git repository/i.test(a.detail ?? '')) {
+        return {
+          title: 'This repo is gone from GitHub (or you lost access)',
+          body: `GitHub says the repo isn't there. Maybe it was deleted or renamed, or this account lost access. Your files are safe on ${platform.here}. If it was renamed, update the folder's remote; otherwise remove it from AutoSync.`,
+        }
+      }
       return {
         title: 'Git stopped with an error',
         body: "AutoSync hit a problem it can't fix on its own. Your changes are safe here and will send once it's sorted.",
@@ -236,7 +315,7 @@ function problemText(a: Attention): { title: string; body: string } {
 }
 
 function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attention: Attention }) {
-  const { title, body } = problemText(a)
+  const { title, body } = problemText(f, a)
   const prompt = attentionPrompt(f, a)
   return (
     <div className="card">
@@ -255,7 +334,16 @@ function ProblemCard({ folder: f, attention: a }: { folder: FolderStatus; attent
           ))}
         </ul>
       )}
-      {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh') && a.detail && <div className="prompt">{a.detail}</div>}
+      {(a.kind === 'auth' || a.kind === 'error' || a.kind === 'no-gh' || a.kind === 'before-push') && a.detail && <div className="prompt">{a.detail}</div>}
+      {a.kind === 'outside-changed' && (
+        <ul className="pairs">
+          {a.files?.map((p) => (
+            <li key={p}>
+              <span>{p}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {a.kind === 'pr-closed' && a.detail && (
         <div className="cb">
           <GitHubLink url={a.detail}>{webLabel(a.detail)}</GitHubLink>
@@ -312,7 +400,7 @@ function TooBigCard({ folder: f }: { folder: FolderStatus }) {
   )
 }
 
-function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: FolderView; paused: boolean }) {
+function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus; view: FolderView; paused: boolean; onSheet: (sheet: SheetState) => void }) {
   const reason = f.offline
     ? 'Waiting — offline'
     : paused || !f.enabled
@@ -321,15 +409,23 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
         ? 'Waiting — fix the problem above'
         : f.pr
           ? `Waiting — in PR #${f.pr.number}`
-          : f.publishVia === 'pr'
-            ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
-            : `Waiting — sends ${SENDS_AFTER}`
+          : f.settings.push === 'manual'
+            ? 'Waiting — you push by hand'
+            : f.settings.push !== 'auto' && f.sendAt !== null
+              ? `Waiting — ${f.publishVia === 'pr' ? 'opens a PR' : 'sends'} at ${clock(f.sendAt)}`
+              : f.publishVia === 'pr'
+                ? `Waiting — opens a PR ${OPENS_PR_AFTER}`
+                : `Waiting — sends ${SENDS_AFTER}`
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
-  const count = f.pending.length + f.tooBig.length + (ignored ? 1 : 0)
+  const count = f.pending.length + f.outside.length + f.inUse.length + f.tooBig.length + (ignored ? 1 : 0)
 
+  const waiting = f.pending.length + f.outside.length + f.inUse.length + f.tooBig.length
   return (
-    <div className="section">
-      <h2>What's not syncing {count > 0 && <span className="n">{count}</span>}</h2>
+    <Fold
+      auto={waiting > 0}
+      title={<>What's not syncing {count > 0 && <span className="n">{count}</span>}</>}
+      summary={waiting > 0 ? `${plural(waiting, 'file')} waiting or held back` : ignored ? `${f.ignored.count.toLocaleString()} files ignored by your .gitignore` : 'Nothing — every file is on GitHub'}
+    >
       <div className="tbl">
         {count === 0 && (
           <div className="tr">
@@ -342,6 +438,30 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
             <span className={`st ${c.status}`}>{c.status}</span>
             <span className="f">{c.path}</span>
             <span className="m">{reason}</span>
+          </div>
+        ))}
+        {f.outside.map((c) => (
+          <div className="tr" key={c.path}>
+            <span className={`st ${c.status}`}>{c.status}</span>
+            <span className="f">{c.path}</span>
+            <span className="m">Outside your synced folders</span>
+          </div>
+        ))}
+        {f.outside.length > 0 && f.enabled && !paused && (
+          <div className="tr">
+            <span className="grow muted">These stay on {platform.here} until you push them yourself.</span>
+            <button className="btn" onClick={() => onSheet({ kind: 'push-outside', id: f.id })}>
+              Push these now…
+            </button>
+          </div>
+        )}
+        {f.inUse.map((p) => (
+          <div className="tr" key={p}>
+            <span className="st muted" title="In use">
+              ⏸
+            </span>
+            <span className="f">{p}</span>
+            <span className="m">In use — database open</span>
           </div>
         ))}
         {f.tooBig.map((t) => (
@@ -363,7 +483,7 @@ function NotSyncing({ folder: f, view, paused }: { folder: FolderStatus; view: F
           </div>
         )}
       </div>
-    </div>
+    </Fold>
   )
 }
 

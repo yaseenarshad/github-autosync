@@ -1,6 +1,7 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/manager.test.ts; changes: registry folders + pause instead of vault configs, AutoSync status fields (sendAt, retryAt, pendingSince, direction), peek, flush follow-up, PR mode.
 import { describe, expect, it } from 'vitest'
-import type { FileChange, FolderStatus } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/status'
+import type { FileChange, FolderStatus, RepoSettings } from '@shared/types'
 import type { RepoPolicy } from './github'
 import { createSyncManager, type FolderConfig, type SyncHost, type SyncManager } from './manager'
 import type { PassResult } from './sync'
@@ -33,7 +34,7 @@ function result(over: Partial<PassResult> = {}, pending: FileChange[] = []): Pas
     level: true,
     tooBig: [],
     alsoSyncedBy: null,
-    facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, ignored: { patterns: [], count: 0 }, conflicts: [] },
+    facts: { branch: 'main', remoteUrl: 'git@github.com:yaseen/notes.git', pending, inUse: [], ignored: { patterns: [], count: 0 }, conflicts: [] },
     policy: null,
     pr: null,
     ...over,
@@ -44,7 +45,7 @@ interface Harness {
   manager: SyncManager
   passes: Array<{ root: string; flush: boolean }>
   /** What each pass was told beyond `flush`: the rules it may assume and whether it may send. */
-  given: Array<{ policy: RepoPolicy | null; publish: boolean }>
+  given: Array<{ policy: RepoPolicy | null; publish: boolean; paths: readonly string[] | null }>
   /** `forgetInFlight` calls, with how many passes had run by then. */
   forgotten: Array<{ root: string; afterPasses: number }>
   /** Every folder status the manager reported, in order (one snapshot per `onChange`). */
@@ -55,7 +56,7 @@ interface Harness {
   status: () => FolderStatus
 }
 
-interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'pollMs' | 'wakeCooldownMs' | 'peekMs' | 'ownWritesMs' | 'prQuietMs' | 'prCheckMs'>> {
+interface Opts extends Partial<Pick<SyncHost, 'quietMs' | 'retryMs' | 'minuteMs' | 'capMs' | 'prCapMs' | 'wakeCooldownMs' | 'peekMs' | 'ownWritesMs' | 'prQuietMs' | 'prCheckMs'>> {
   /** `n` is the 1-based pass count. */
   pass?: (n: number, onDirection: (d: 'up' | 'down') => void) => Promise<PassResult>
   /** What `git status` finds after a watcher event; by default the event was a real edit. */
@@ -76,7 +77,7 @@ function harness(opts: Opts = {}): Harness {
   const host: SyncHost = {
     sync: async (root, o) => {
       passes.push({ root, flush: o.flush })
-      given.push({ policy: o.policy, publish: o.publish })
+      given.push({ policy: o.policy, publish: o.publish, paths: o.settings.paths })
       return opts.pass === undefined ? result() : opts.pass(passes.length, o.onDirection)
     },
     peek: async () => {
@@ -96,7 +97,9 @@ function harness(opts: Opts = {}): Harness {
     },
     quietMs: opts.quietMs ?? NEVER,
     retryMs: opts.retryMs ?? NEVER,
-    pollMs: opts.pollMs ?? NEVER,
+    minuteMs: opts.minuteMs ?? NEVER,
+    capMs: opts.capMs ?? NEVER,
+    prCapMs: opts.prCapMs ?? NEVER,
     wakeCooldownMs: opts.wakeCooldownMs ?? NEVER,
     peekMs: opts.peekMs ?? 1,
     ownWritesMs: opts.ownWritesMs ?? 0,
@@ -331,8 +334,8 @@ describe('offline retry', () => {
 })
 
 describe('idle poll', () => {
-  it('pulls again after `pollMs` while level, without a syncing flash', async () => {
-    const h = harness({ pollMs: 20 })
+  it('pulls again after `minuteMs` while level, without a syncing flash', async () => {
+    const h = harness({ minuteMs: 20 })
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
     const afterStart = h.seen.length
@@ -343,14 +346,14 @@ describe('idle poll', () => {
 
   it('keeps polling with conflict copies around, and stops on any other attention or offline', async () => {
     const conflict = result({ attention: { kind: 'conflict', conflicts: [{ original: 'a.md', copy: 'a (conflict Mac-B, 2026-09-27).md' }] } })
-    const h1 = harness({ pollMs: 10, pass: async () => conflict })
+    const h1 = harness({ minuteMs: 10, pass: async () => conflict })
     h1.manager.setFolders([A], false)
     await until(() => h1.passes.length >= 3)
     expect(h1.status().state).toBe('attention')
     h1.manager.setFolders([], false)
 
     for (const stop of [result({ attention: { kind: 'auth', detail: 'fatal: Authentication failed' }, level: false }), result({ offline: true, level: false })]) {
-      const h = harness({ pollMs: 10, pass: async () => stop })
+      const h = harness({ minuteMs: 10, pass: async () => stop })
       h.manager.setFolders([A], false)
       await until(() => h.passes.length === 1 && h.status().state !== 'syncing')
       await sleep(60)
@@ -360,7 +363,7 @@ describe('idle poll', () => {
   })
 
   it('stands down while edits settle; the edit’s pass re-arms it', async () => {
-    const h = harness({ pollMs: 40, quietMs: 80 })
+    const h = harness({ minuteMs: 40, quietMs: 80 })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length === 1 && h.status().state === 'synced')
     h.emit()
@@ -501,14 +504,14 @@ describe('PR mode (D22, D24, D26)', () => {
   })
 
   it('is push mode on any branch but the one the rules govern', async () => {
-    const h = harness({ pass: async () => result({ policy: RULES, facts: { branch: 'dev', remoteUrl: null, pending: [], ignored: { patterns: [], count: 0 }, conflicts: [] } }) })
+    const h = harness({ pass: async () => result({ policy: RULES, facts: { branch: 'dev', remoteUrl: null, pending: [], inUse: [], ignored: { patterns: [], count: 0 }, conflicts: [] } }) })
     h.manager.setFolders([A], false)
     await until(() => h.status().state === 'synced')
     expect(h.status().publishVia).toBe('push')
   })
 
   it('quiet passes may not send; every other pass may', async () => {
-    const h = harness({ pollMs: 10 })
+    const h = harness({ minuteMs: 10 })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length >= 2)
     h.manager.setFolders([], false)
@@ -538,7 +541,7 @@ describe('PR mode (D22, D24, D26)', () => {
     await sleep(40)
     expect(h.passes).toHaveLength(3) // merged and level: back to the (parked) idle poll
 
-    const idle = harness({ pollMs: 5, pass: async () => open })
+    const idle = harness({ minuteMs: 5, pass: async () => open })
     idle.manager.setFolders([A], false)
     await sleep(60)
     expect(idle.passes).toHaveLength(1)
@@ -561,7 +564,7 @@ describe('PR mode (D22, D24, D26)', () => {
 
   it('a quiet pass that landed a batch but could not send it arms the send', async () => {
     const answers = [result({ policy: RULES }), result({ level: false, policy: RULES }, EDIT)]
-    const h = harness({ pollMs: 5, prQuietMs: 20, pass: async (n) => answers[n - 1] ?? result({ policy: RULES }) })
+    const h = harness({ minuteMs: 5, prQuietMs: 20, pass: async (n) => answers[n - 1] ?? result({ policy: RULES }) })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length >= 3)
     h.manager.setFolders([], false)
@@ -587,7 +590,7 @@ describe('PR mode (D22, D24, D26)', () => {
   })
 
   it.each(['pr-closed', 'other-app', 'busy-repo'] as const)('looks again quietly after `%s`: the user settles it outside the app', async (kind) => {
-    const h = harness({ pollMs: 10, pass: async () => result({ level: false, attention: { kind } }) })
+    const h = harness({ minuteMs: 10, pass: async () => result({ level: false, attention: { kind } }) })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length >= 2)
     h.manager.setFolders([], false)
@@ -595,11 +598,179 @@ describe('PR mode (D22, D24, D26)', () => {
   })
 
   it('does not look again after `no-gh`: that waits for the user', async () => {
-    const h = harness({ pollMs: 10, pass: async () => result({ level: false, attention: { kind: 'no-gh', detail: 'GitHub CLI (gh) is not installed.' } }) })
+    const h = harness({ minuteMs: 10, pass: async () => result({ level: false, attention: { kind: 'no-gh', detail: 'GitHub CLI (gh) is not installed.' } }) })
     h.manager.setFolders([A], false)
     await until(() => h.passes.length === 1 && h.status().state === 'attention')
     await sleep(60)
     expect(h.passes).toHaveLength(1)
+    h.manager.setFolders([], false)
+  })
+})
+
+describe('push and pull per repo (D37 to D42, D52)', () => {
+  const every = (push: RepoSettings['push'], pull: RepoSettings['pull'] = 1): FolderConfig => ({ ...A, settings: { ...DEFAULT_SETTINGS, push, pull } })
+  /** Pulls (quiet) leave the change unsent; a send clears it. */
+  function sendsClear(h: () => Harness): (n: number) => Promise<PassResult> {
+    return async (n) => (h().given[n - 1]?.publish === true ? result() : result({ level: false }, EDIT))
+  }
+  const sends = (h: Harness) => h.given.filter((g) => g.publish).length
+  const pulls = (h: Harness) => h.given.filter((g) => !g.publish).length
+
+  it('a fixed timer sends once at its time while edits continue; pulls keep coming and never send', async () => {
+    let h: Harness
+    h = harness({ minuteMs: 40, pass: sendsClear(() => h) })
+    h.manager.setFolders([every(3)], false)
+    await until(() => h.status().sendAt !== null)
+    const due = h.status().sendAt
+    for (let i = 0; i < 5; i += 1) {
+      h.emit()
+      await sleep(15)
+    }
+    expect(h.status().sendAt).toBe(due) // edits never move a fixed timer (D37)
+    expect(sends(h)).toBe(0)
+    await until(() => sends(h) === 1, 1000)
+    expect(pulls(h)).toBeGreaterThanOrEqual(2) // the start pass and the pulls in between (D39)
+    await sleep(150)
+    expect(sends(h)).toBe(1)
+    h.manager.setFolders([], false)
+  })
+
+  it('Auto sends by its cap under a writer that never stops (D38)', async () => {
+    const h = harness({ quietMs: 50, capMs: 120 })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    const t0 = Date.now()
+    while (Date.now() - t0 < 400 && sends(h) < 2) {
+      h.emit()
+      await sleep(20)
+    }
+    expect(sends(h)).toBe(2) // the start pass, then the capped send
+    expect(Date.now() - t0).toBeLessThan(380)
+    h.manager.setFolders([], false)
+  })
+
+  it('by hand: never sends on its own, not on a wake, not on quit; Sync now still sends (D37, D42)', async () => {
+    let h: Harness
+    h = harness({ quietMs: 0, minuteMs: NEVER, wakeCooldownMs: 0, pass: sendsClear(() => h) })
+    h.manager.setFolders([every('manual')], false)
+    await until(() => h.status().lastCheckedAt !== null)
+    h.emit()
+    await sleep(40)
+    h.manager.notifyWake()
+    await sleep(40)
+    expect(sends(h)).toBe(0)
+    expect(h.status()).toMatchObject({ state: 'pending', sendAt: null })
+
+    await h.manager.syncNow('a')
+    expect(sends(h)).toBe(1)
+    const before = h.passes.length
+    await h.manager.flushForQuit()
+    expect(h.passes).toHaveLength(before)
+  })
+
+  it('a wake pulls quietly on a timer repo, and does nothing where pulls are by hand (D39)', async () => {
+    const h = harness({ wakeCooldownMs: 0 })
+    h.manager.setFolders([every(60)], false)
+    // The start pass of a timer repo is a quiet one: no syncing flash, so wait for its result.
+    await until(() => h.status().lastCheckedAt !== null)
+    h.manager.notifyWake()
+    await until(() => h.passes.length === 2)
+    expect(h.given[1]?.publish).toBe(false)
+
+    const off = harness({ wakeCooldownMs: 0 })
+    off.manager.setFolders([every(60, 'manual')], false)
+    await until(() => off.status().lastCheckedAt !== null)
+    off.manager.notifyWake()
+    await sleep(40)
+    expect(off.passes).toHaveLength(1)
+  })
+
+  it('shows when the next pull runs, and none while Auto is about to send (D52)', async () => {
+    const h = harness({ minuteMs: NEVER, quietMs: NEVER })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    expect(h.status().pullAt).toEqual(expect.any(Number))
+    h.emit()
+    await until(() => h.status().sendAt !== null)
+    expect(h.status().pullAt).toBeNull()
+    h.manager.setFolders([], false)
+  })
+
+  it('an edit outside the picked folders is listed but starts no push (D46, D47)', async () => {
+    const outside: FileChange[] = [{ status: 'M', path: 'app/db.sqlite' }]
+    const h = harness({ quietMs: 10, peek: async () => outside })
+    h.manager.setFolders([{ ...A, settings: { ...DEFAULT_SETTINGS, paths: ['docs'] } }], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    await until(() => h.status().outside.length === 1)
+    await sleep(40)
+    expect(h.status()).toMatchObject({ state: 'synced', pending: [], sendAt: null })
+    expect(h.passes).toHaveLength(1)
+
+    // Push these now…: one send that takes the whole repo, then back to the picks.
+    await h.manager.pushOutside('a')
+    expect(h.given.map((g) => g.paths)).toEqual([['docs'], null])
+    await h.manager.syncNow('a')
+    expect(h.given[2]?.paths).toEqual(['docs'])
+    h.manager.setFolders([], false)
+  })
+
+  it('a pause for a while keeps the folder off, then turns it on with a pass; Resume now ends it early (D51)', async () => {
+    const h = harness()
+    h.manager.setFolders([{ ...A, pausedUntil: Date.now() + 80 }], false)
+    expect(h.status()).toMatchObject({ state: 'off', pausedUntil: expect.any(Number) })
+    expect(h.watching()).toBe(0)
+    await sleep(40)
+    expect(h.passes).toHaveLength(0)
+    await until(() => h.passes.length === 1)
+    expect(h.status().pausedUntil).toBeNull()
+
+    const r = harness()
+    r.manager.setFolders([{ ...A, pausedUntil: Date.now() + NEVER }], false)
+    r.manager.setFolders([A], false) // Resume now: the app drops `pausedUntil`
+    await until(() => r.passes.length === 1)
+    // The app-wide pause still wins over a pause that has ended.
+    const p = harness()
+    p.manager.setFolders([{ ...A, pausedUntil: Date.now() + 30 }], true)
+    await sleep(80)
+    expect(p.passes).toHaveLength(0)
+  })
+
+  it('a settings change re-times at once: Auto to by hand drops the armed send', async () => {
+    const h = harness({ quietMs: NEVER, minuteMs: NEVER })
+    h.manager.setFolders([A], false)
+    await until(() => h.status().state === 'synced')
+    h.emit()
+    await until(() => h.status().sendAt !== null)
+    h.manager.setFolders([every('manual')], false)
+    expect(h.status()).toMatchObject({ sendAt: null, settings: { push: 'manual' } })
+    h.manager.setFolders([], false)
+  })
+})
+
+describe('checker 9A: an offline pull never pushes early (D37, D40)', () => {
+  const every = (push: RepoSettings['push'], pull: RepoSettings['pull'] = 1): FolderConfig => ({ ...A, settings: { ...DEFAULT_SETTINGS, push, pull } })
+  for (const push of ['manual', 60] as const) {
+    it(`push ${push}: the one retry after an offline pull is a pull too`, async () => {
+      const h = harness({ retryMs: 30, minuteMs: NEVER, pass: async (n) => (n === 1 ? result({ offline: true, level: false, fetched: false }, EDIT) : result({ level: false }, EDIT)) })
+      h.manager.setFolders([every(push)], false)
+      await until(() => h.passes.length >= 2, 1000)
+      expect(h.given.map((g) => g.publish)).toEqual([false, false])
+      h.manager.setFolders([], false)
+    })
+  }
+})
+
+describe('checker 9E: Push these now… during a send', () => {
+  it('the follow-up send still takes the whole repo once', async () => {
+    const g = gate()
+    const h = harness({ pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    h.manager.setFolders([{ ...A, settings: { ...DEFAULT_SETTINGS, paths: ['docs'] } }], false)
+    await until(() => h.passes.length === 1)
+    const done = h.manager.pushOutside('a')
+    g.release()
+    await done
+    expect(h.given.map((x) => x.paths)).toEqual([['docs'], null])
     h.manager.setFolders([], false)
   })
 })

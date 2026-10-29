@@ -1,8 +1,8 @@
 import type { AppStatus } from '@shared/types'
-import { byWorst, plural } from '@shared/status'
+import { byWorst, plural, settingsSummary } from '@shared/status'
 import { folderView, overall } from '../lib/summary'
 import { Icon } from './Icon'
-import { Ago } from './Time'
+import { Ago, In } from './Time'
 
 export function Overview({ status, onSelect }: { status: AppStatus; onSelect: (id: string) => void }) {
   const o = overall(status)
@@ -61,6 +61,13 @@ export function Overview({ status, onSelect }: { status: AppStatus; onSelect: (i
                       Last synced <Ago at={f.lastSyncedAt} />
                     </>
                   )}
+                  {f.pending.length > 0 && f.settings.push !== 'auto' && f.sendAt !== null && (
+                    <>
+                      {' '}
+                      · next push <In at={f.sendAt} />
+                    </>
+                  )}
+                  <span className="muted"> · {settingsSummary(f.settings)}</span>
                 </div>
               </div>
               <span className={`tag ${v.cls}`}>{v.short}</span>

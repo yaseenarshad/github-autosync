@@ -83,6 +83,22 @@ export function attentionPrompt(f: FolderStatus, a: Attention): string {
         "Don't change any files or git settings yourself."
       )
     }
+    case 'before-push':
+      return (
+        `In ${where(f)}, GitHub AutoSync runs this command before each push: ${f.settings.beforePush ?? ''}\n` +
+        'It failed, so AutoSync committed and pushed nothing. Its last lines:\n' +
+        `${a.detail ?? ''}\n\n` +
+        `Find out why it fails when run in ${f.path} and fix it, without losing any changes. Then run it again to confirm it exits 0.`
+      )
+    case 'outside-changed':
+      return (
+        `In ${where(f)}, GitHub AutoSync holds some files back: files outside the synced folders (${(f.settings.paths ?? ['the whole repo']).join(', ')}), and open databases (a -wal or -journal file beside them). ` +
+        'These held-back files changed on this computer and also on GitHub, so AutoSync stopped before pulling:\n' +
+        (a.files ?? []).map((p) => `- ${p}`).join('\n') +
+        '\n\nFor each file, compare my local change with the version on GitHub ("git fetch", then "git diff HEAD...@{u} -- <file>" and "git diff -- <file>"). ' +
+        'Keep what matters from both: commit and push it by hand, or put my change aside if GitHub\'s version is right. ' +
+        "Don't touch files inside the synced folders, and leave the folder on its branch with a clean status for those files."
+      )
     case 'error':
       return (
         `GitHub AutoSync hit a git error in ${where(f)}` +

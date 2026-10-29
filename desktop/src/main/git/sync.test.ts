@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
 import { clone, lateSave, makeBareRemote, makeGitRepo, pushedRepo as pushedFixture, REAL_GIT_TIMEOUT_MS, remoteHead, requireGit, shPath, wireOrigin, type BareRemote, type GitRepo } from './gitFixture'
-import { commitMessage, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
+import { commitMessage, fileList, TOO_BIG_BYTES, TRANSFER_TIMEOUT_MS } from './pass'
 import { hostName, syncFolder, type PassOptions } from './sync'
 
 // Real git throughout; the spy only records what each call was given.
@@ -27,8 +27,8 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-async function pushedRepo(): Promise<{ repo: GitRepo; remote: BareRemote }> {
-  const fixture = await pushedFixture()
+async function pushedRepo(files?: Record<string, string>): Promise<{ repo: GitRepo; remote: BareRemote }> {
+  const fixture = await pushedFixture(files)
   cleanups.push(fixture.cleanup)
   return fixture
 }
@@ -62,10 +62,41 @@ async function oversize(repo: GitRepo, name: string, bytes = TOO_BIG_BYTES): Pro
   await truncate(path.join(repo.root, name), bytes)
 }
 
+describe('commit messages name the shared folder and list every file (D50)', () => {
+  it('names the deepest shared folder, two levels at most, and none when the files share none', () => {
+    expect(commitMessage('Mac-A', ['README.md'])).toBe('sync (Mac-A): README.md')
+    expect(commitMessage('Mac-A', ['yaseen/docs/10-28/Work.md', 'yaseen/docs/10-28/Scenarios.excalidraw', 'yaseen/docs/Map.md'])).toBe(
+      'sync (Mac-A): yaseen/docs — Work.md, Scenarios.excalidraw, Map.md',
+    )
+    expect(commitMessage('Mac-A', ['yaseen/docs/a.md', 'smeet/docs/b.md'])).toBe('sync (Mac-A): a.md, b.md')
+    expect(commitMessage('Mac-A', ['docs/a.md', 'top.md'])).toBe('sync (Mac-A): a.md, top.md')
+  })
+
+  it('lists each file in the body, then counts the rest after 50', () => {
+    expect(fileList(['a.md', 'docs/b.md'])).toBe('- a.md\n- docs/b.md')
+    const many = Array.from({ length: 53 }, (_, i) => `f${i}.md`)
+    expect(fileList(many).split('\n')).toHaveLength(51)
+    expect(fileList(many).endsWith('- …and 3 more')).toBe(true)
+  })
+
+  it(
+    'puts the list in the commit body on GitHub',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('docs/a.md', 'a\n')
+      await repo.write('docs/b.md', 'b\n')
+      await pass(repo)
+      const b = await otherComputer(remote)
+      expect(await b.run(['log', '-1', '--format=%s%n%b'])).toBe('sync (Mac-A): docs — a.md, b.md\n- docs/a.md\n- docs/b.md')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
 describe('commitMessage / hostName (D16)', () => {
   it('names up to three basenames after the host, and falls back to a bare subject', () => {
     expect(commitMessage('Mac-A', [])).toBe('sync (Mac-A)')
-    expect(commitMessage('Mac-A', ['notes/deep/one.md'])).toBe('sync (Mac-A): one.md')
+    expect(commitMessage('Mac-A', ['notes/deep/one.md'])).toBe('sync (Mac-A): notes/deep — one.md')
     expect(commitMessage('Mac-A', ['a.md', 'b.md', 'c.md'])).toBe('sync (Mac-A): a.md, b.md, c.md')
     expect(commitMessage('Mac-A', ['a.md', 'b.md', 'c.md', 'd.md', 'e.md'])).toBe('sync (Mac-A): a.md, b.md, c.md +2 more')
   })
@@ -580,7 +611,8 @@ describe('a save that lands under the rebase (D30, D31)', { timeout: REAL_GIT_TI
 
     expect(await pass(repo)).toMatchObject({ attention: null, level: true })
 
-    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-A): note.md\nsync (Mac-B)\nbase')
+    // The late save's commit and the pass's own fold into one before the push (D41).
+    expect(await repo.run(['log', '--format=%s'])).toBe('sync (Mac-A): note.md\nsync (Mac-B)\nbase')
     expect(await repo.read('note.md')).toBe('saved mid-rebase\n')
     expect(await remoteHead(repo, remote)).toBe(await repo.run(['rev-parse', 'HEAD']))
     // Nothing to settle or abort: the refused rebase never touched the save.
@@ -651,4 +683,207 @@ describe('flush mode (quit)', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
     expect(calls.some(([, , args]) => args[0] === 'fetch')).toBe(false)
     expect(calls.filter(([, , args]) => args[0] === 'push').map(([, , , opts]) => opts?.timeoutMs)).toEqual([5_000])
   })
+})
+
+describe('pulls never push; one commit per push (D40, D41)', () => {
+  const log = async (repo: GitRepo, range: string) => (await repo.run(['log', '--format=%s', range])).split('\n').filter((l) => l !== '')
+
+  it(
+    'three pulls with edits between them commit here only; the send then pushes them as one commit',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const b = await otherComputer(remote)
+
+      for (const [i, file] of ['a.md', 'b.md', 'c.md'].entries()) {
+        await repo.write(file, `edit ${i}\n`)
+        await pushFrom(b, { [`theirs-${i}.md`]: 'x\n' })
+        const pulled = await pass(repo, { publish: false })
+        expect(pulled).toMatchObject({ attention: null, fetched: true, level: false })
+      }
+      expect(await repo.read('theirs-2.md')).toBe('x\n') // their changes came in
+      expect(await log(repo, '@{u}..HEAD')).toHaveLength(3) // ours stayed here
+      expect((await log(repo, '@{u}')).filter((s) => s.startsWith('sync (Mac-A)'))).toEqual([]) // nothing of ours reached GitHub
+
+      const sent = await pass(repo)
+      expect(sent).toMatchObject({ attention: null, level: true })
+      await b.run(['fetch', '-q'])
+      const mine = (await log(b, 'HEAD..origin/main')).filter((s) => s.startsWith('sync (Mac-A)'))
+      expect(mine).toEqual([commitMessage('Mac-A', ['a.md', 'b.md', 'c.md'])])
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'never folds a commit the user made by hand: everything goes as it is',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('a.md', 'one\n')
+      await pass(repo, { publish: false })
+      await repo.write('b.md', 'two\n')
+      await repo.run(['add', 'b.md'])
+      await repo.run(['commit', '-qm', 'My own commit'])
+      await repo.write('c.md', 'three\n')
+      await pass(repo, { publish: false })
+
+      await pass(repo)
+      const b = await otherComputer(remote)
+      expect(await log(b, '-3')).toEqual(['sync (Mac-A): c.md', 'My own commit', 'sync (Mac-A): a.md'])
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('picked folders (D44, D45)', () => {
+  const docsOnly = { settings: { push: 'auto' as const, pull: 1 as const, paths: ['docs'], beforePush: null } }
+
+  it(
+    'pushes an edit inside the picks and keeps one outside on this computer, also through a pull',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('docs/a.md', 'mine\n')
+      await repo.write('app/db.sqlite', 'live data\n')
+      await repo.write('missing-folder-is-fine.md', 'top\n')
+
+      expect(await pass(repo, { settings: { ...docsOnly.settings, paths: ['docs', 'not/here'] } })).toMatchObject({ attention: null, level: true })
+      const b = await otherComputer(remote)
+      expect(await b.read('docs/a.md')).toBe('mine\n')
+      expect(existsSync(path.join(b.root, 'app/db.sqlite'))).toBe(false)
+
+      // A teammate changes a DIFFERENT file outside the picks: it pulls in, and the local one stays.
+      await pushFrom(b, { 'app/other.txt': 'theirs\n' })
+      expect(await pass(repo, docsOnly)).toMatchObject({ attention: null, level: true })
+      expect(await repo.read('app/other.txt')).toBe('theirs\n')
+      expect(await repo.read('app/db.sqlite')).toBe('live data\n')
+      expect(await repo.run(['status', '--porcelain'])).toContain('app/db.sqlite')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'stops before the pull when a file outside the picks changed here and on GitHub, leaving both versions as they were',
+    async () => {
+      const { repo, remote } = await pushedRepo({ 'note.md': 'base\n', 'app/config.json': '{"v":1}\n' })
+      const b = await otherComputer(remote)
+      await pushFrom(b, { 'app/config.json': '{"v":"theirs"}\n' })
+      await repo.write('app/config.json', '{"v":"mine"}\n')
+      const head = await repo.run(['rev-parse', 'HEAD'])
+
+      const res = await pass(repo, docsOnly)
+      expect(res).toMatchObject({ attention: { kind: 'outside-changed', files: ['app/config.json'] }, level: false })
+      expect(await repo.read('app/config.json')).toBe('{"v":"mine"}\n')
+      expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+      expect(await repo.run(['show', '@{u}:app/config.json'])).toBe('{"v":"theirs"}')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a pass with no picks (Push these now…) sends the files outside them too',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('app/x.txt', 'x\n')
+      await pass(repo, docsOnly)
+      expect(await repo.run(['status', '--porcelain', '-uall'])).toContain('app/x.txt')
+      await pass(repo)
+      expect(await (await otherComputer(remote)).read('app/x.txt')).toBe('x\n')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('open databases and the command before a push (D48, D49)', () => {
+  const withCommand = (beforePush: string) => ({ settings: { push: 'auto' as const, pull: 1 as const, paths: null, beforePush } })
+
+  it(
+    'holds a database back while its -wal is beside it, and sends it once the -wal is gone',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('.gitignore', '*.db-wal\n')
+      await repo.write('data/lab.db', 'old pages\n')
+      await repo.write('data/lab.db-wal', 'new pages\n')
+      await repo.write('note.md', 'edit\n')
+
+      const res = await pass(repo)
+      expect(res).toMatchObject({ attention: null, level: true, facts: { inUse: ['data/lab.db'] } })
+      expect(res.facts?.pending.map((c) => c.path)).not.toContain('data/lab.db')
+      const b = await otherComputer(remote)
+      expect(existsSync(path.join(b.root, 'data/lab.db'))).toBe(false)
+      expect(await b.read('note.md')).toBe('edit\n')
+
+      await unlink(path.join(repo.root, 'data/lab.db-wal'))
+      expect(await pass(repo)).toMatchObject({ level: true, facts: { inUse: [] } })
+      await b.run(['pull', '-q'])
+      expect(await b.read('data/lab.db')).toBe('old pages\n')
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a command that fails stops the pass with its output; nothing is committed or pushed',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const head = await repo.run(['rev-parse', 'HEAD'])
+      await repo.write('note.md', 'edit\n')
+      const res = await pass(repo, withCommand('echo checking keys && echo found a key 1>&2 && exit 3'))
+      expect(res.attention?.kind).toBe('before-push')
+      expect(res.attention?.detail).toMatch(/checking keys[\s\S]*found a key[\s\S]*exit code 3/)
+      expect(await repo.run(['rev-parse', 'HEAD'])).toBe(head)
+      expect(await remoteHead(repo, remote)).toBe(head)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+
+  it(
+    'a command that writes a file puts it in the same push; a pull never runs it',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      await repo.write('note.md', 'edit\n')
+      await pass(repo, { ...withCommand('echo folded > folded.txt'), publish: false })
+      expect(existsSync(path.join(repo.root, 'folded.txt'))).toBe(false)
+      expect(await pass(repo, withCommand('echo folded > folded.txt'))).toMatchObject({ attention: null, level: true })
+      const b = await otherComputer(remote)
+      expect((await b.read('folded.txt')).trim()).toBe('folded')
+      expect(await b.run(['log', '-1', '--format=%s'])).toMatch(/^sync \(Mac-A\): /)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('checker 9B: an open database that a teammate changed (D48, D45)', () => {
+  it(
+    'never undoes the teammate’s version without a word',
+    async () => {
+      const { repo, remote } = await pushedRepo({ 'note.md': 'line one\n', '.gitignore': '*.db-wal\n', 'data/lab.db': 'v1\n' })
+      const b = await otherComputer(remote)
+      await pushFrom(b, { 'data/lab.db': 'teammate\n' })
+      await repo.write('data/lab.db', 'mine\n')
+      await repo.write('data/lab.db-wal', 'pages\n')
+      await repo.write('note.md', 'edit\n')
+
+      const first = await pass(repo)
+      const stopped = first.attention !== null
+      await unlink(path.join(repo.root, 'data/lab.db-wal'))
+      if (!stopped) await pass(repo)
+      await b.run(['pull', '-q'])
+      const kept = (await b.run(['ls-files', 'data'])).split('\n').filter((l) => l !== '')
+      const contents = await Promise.all(kept.map((rel) => b.read(rel)))
+      // Either the pass stopped and said so, or the teammate's bytes are still somewhere on GitHub.
+      expect(stopped || contents.includes('teammate\n')).toBe(true)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('checker 9F: the quit and the command before a push (D49, D42)', () => {
+  it(
+    'a quit flush never pushes past a command that fails',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const head = await repo.run(['rev-parse', 'HEAD'])
+      await repo.write('notes/secret.md', 'sk-or-' + 'v1-not-a-real-key\n')
+      await pass(repo, { flush: true, settings: { push: 'auto', pull: 1, paths: null, beforePush: 'echo found a key 1>&2; exit 1' } })
+      expect(await remoteHead(repo, remote)).toBe(head)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
 })

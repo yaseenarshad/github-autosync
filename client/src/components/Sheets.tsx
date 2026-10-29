@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AppStatus, FolderStatus, FolderVerdict, ThemeChoice } from '@shared/types'
-import { CHECKS_EVERY, SENDS_AFTER } from '@shared/status'
+import type { AppStatus, FolderStatus, FolderVerdict, OtherRepo, ThemeChoice } from '@shared/types'
+import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel } from '@shared/status'
+import { decodePull, decodePush, encode } from './SyncSettings'
+import { Ago } from './Time'
 import { AddFolderSheet } from './AddFolderSheet'
+import { FolderPickerSheet } from './FolderPicker'
 import { platform } from '../lib/platform'
 
 export type SheetState =
@@ -13,6 +16,11 @@ export type SheetState =
   | { kind: 'folder-on'; id: string }
   | { kind: 'remove'; id: string }
   | { kind: 'rename'; id: string }
+  | { kind: 'pick-folders'; id: string }
+  | { kind: 'push-outside'; id: string }
+  | { kind: 'add-other'; key: string }
+  | { kind: 'clone-other'; key: string }
+  | { kind: 'hide-other'; key: string }
 
 interface SheetProps {
   title: string
@@ -124,18 +132,95 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
       >
         <span className="mono">{status.hostname}</span>
       </Setting>
-      <Setting title="When it syncs" detail={`Sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit.`} />
-      <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
+      <SettingsFolderRow status={status} />
+      {status.others.some((o) => o.hidden) && (
+        <Setting title="Hidden repos" detail={`${status.others.filter((o) => o.hidden).map((o) => o.name).join(', ')}: synced on your other computers, hidden here.`}>
+          <button className="btn" onClick={() => window.autosync.hideOther(null)}>
+            Show hidden repos
+          </button>
+        </Setting>
+      )}
+      <ComputersRow status={status} />
+      <Setting title="New repos start with" detail="Until someone changes a repo's Sync settings. These stay on this computer.">
+        <div className="acts">
+          <select className="select" aria-label="Default push" value={encode(status.defaults.push)} onChange={(e) => window.autosync.setDefaults({ ...status.defaults, push: decodePush(e.target.value) })}>
+            {PUSH_CHOICES.map((p) => (
+              <option key={encode(p)} value={encode(p)}>
+                Push: {pushLabel(p)}
+              </option>
+            ))}
+          </select>
+          <select className="select" aria-label="Default pull" value={encode(status.defaults.pull)} onChange={(e) => window.autosync.setDefaults({ ...status.defaults, pull: decodePull(e.target.value) })}>
+            {PULL_CHOICES.map((p) => (
+              <option key={encode(p)} value={encode(p)}>
+                Pull: {pullLabel(p)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Setting>
+      <Setting title="Notifications" detail="Only when a folder needs you, or changes are still not on GitHub an hour after their push was due. Never on success." />
     </Sheet>
   )
 }
 
-function Setting({ title, detail, children }: { title: string; detail: string; children?: ReactNode }) {
+/** Item 18: the computers sharing the settings folder, and when each last saved — proof they are connected. */
+function ComputersRow({ status }: { status: AppStatus }) {
+  if (status.computers.length === 0) return null
+  return (
+    <div className="set">
+      <div className="grow">
+        <div className="t">Computers</div>
+        <ul className="computers">
+          {status.computers.map((c) => (
+            <li key={`${c.name}-${c.me}`}>
+              <span className="mono">{c.name}</span>
+              {c.me && <span className="muted"> (this {platform.machine})</span>}
+              <span className="muted"> · {c.savedAt === null ? 'nothing saved yet' : <>saved <Ago at={c.savedAt} /></>}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+/** D35: where the settings travel. Each computer writes only its own file there. */
+function SettingsFolderRow({ status }: { status: AppStatus }) {
+  const api = window.autosync
+  const detail = status.settingsFolder === null
+    ? `Not set: each folder's settings stay on ${platform.here}. Pick a folder that git syncs to share them with your other computers.`
+    : status.settingsFolderMissing
+      ? `Can't find ${status.settingsFolder}. AutoSync keeps its own copy until it's back.`
+      : status.settingsFolderNote !== null
+        ? `${status.settingsFolder} · ${status.settingsFolderNote}`
+        : `${status.settingsFolder} · each computer writes its own file here`
+  async function choose() {
+    const picked = await api.pickSettingsFolder()
+    if (picked !== null) await api.setSettingsFolder(picked)
+  }
+  return (
+    <Setting title="Settings folder" detail={detail} warn={status.settingsFolderMissing || status.settingsFolderNote !== null}>
+      <div className="acts">
+        <button className="btn" onClick={choose}>
+          Choose…
+        </button>
+        {status.settingsFolder !== null && (
+          <button className="btn" onClick={() => api.setSettingsFolder(null)}>
+            Stop sharing
+          </button>
+        )}
+      </div>
+    </Setting>
+  )
+}
+
+function Setting({ title, detail, children, warn }: { title: string; detail: string; children?: ReactNode; warn?: boolean }) {
   return (
     <div className="set">
       <div className="grow">
         <div className="t">{title}</div>
-        <div className="d">{detail}</div>
+        <div className={`d${warn ? ' warn' : ''}`}>{detail}</div>
       </div>
       {children}
     </div>
@@ -148,9 +233,11 @@ interface AppSheetProps {
   home: string | null
   onClose: () => void
   onSelect: (id: string | null) => void
+  /** D53: an Add whose checks failed shows the Add sheet with the reason. */
+  onAddFailed: (verdict: FolderVerdict) => void
 }
 
-export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetProps) {
+export function AppSheet({ sheet, status, home, onClose, onSelect, onAddFailed }: AppSheetProps) {
   const api = window.autosync
 
   switch (sheet.kind) {
@@ -187,6 +274,13 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           </p>
         </ConfirmSheet>
       )
+  }
+
+  if (sheet.kind === 'add-other' || sheet.kind === 'clone-other' || sheet.kind === 'hide-other') {
+    // A status push can drop the repo (added elsewhere, or no longer synced) while its sheet is open.
+    const other = status.others.find((o) => o.key === sheet.key)
+    if (!other) return null
+    return <OtherSheet kind={sheet.kind} other={other} onClose={onClose} onAddFailed={onAddFailed} />
   }
 
   // A status push can remove the folder while its sheet is open.
@@ -241,6 +335,76 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
       )
     case 'rename':
       return <RenameSheet folder={folder} onClose={onClose} />
+    case 'pick-folders':
+      return <FolderPickerSheet folder={folder} onClose={onClose} />
+    case 'push-outside':
+      return (
+        <ConfirmSheet title={`Push ${folder.outside.length === 1 ? 'this file' : `these ${folder.outside.length} files`} now?`} confirm="Push now" onConfirm={() => api.pushOutside(folder.id)} onClose={onClose}>
+          <p className="first">
+            They are outside the folders “{folder.name}” syncs. AutoSync sends them once, with everything else that waits, and then goes back to your
+            folders only.
+          </p>
+          <ul className="files">
+            {folder.outside.map((c) => (
+              <li key={c.path}>{c.path}</li>
+            ))}
+          </ul>
+        </ConfirmSheet>
+      )
+  }
+}
+
+/** D53, D54: Add, Clone… and hide each say what will happen before anything does (D15). */
+function OtherSheet({ kind, other: o, onClose, onAddFailed }: { kind: 'add-other' | 'clone-other' | 'hide-other'; other: OtherRepo; onClose: () => void; onAddFailed: (verdict: FolderVerdict) => void }) {
+  const api = window.autosync
+  const from = o.computers.join(', ')
+  const settings = (
+    <ul className="files">
+      <li>Push: {pushLabel(o.settings.push)}</li>
+      <li>Pull: {pullLabel(o.settings.pull)}</li>
+      <li>Folders: {o.settings.paths === null ? 'the whole repo' : o.settings.paths.join(', ')}</li>
+      {o.settings.beforePush !== null && <li>Before each push: {o.settings.beforePush}</li>}
+    </ul>
+  )
+  switch (kind) {
+    case 'add-other':
+      return (
+        <ConfirmSheet
+          title={`Start syncing “${o.name}” on ${platform.here}?`}
+          confirm="Start syncing"
+          onConfirm={async () => {
+            const verdict = await api.addOther(o.key)
+            if (!verdict.ok) onAddFailed(verdict)
+          }}
+          onClose={onClose}
+        >
+          <p className="first">
+            {from} syncs this repo. AutoSync found a copy here: <span className="mono">{o.found}</span>. It will pull what changed, then sync with the same
+            settings as {from}:
+          </p>
+          {settings}
+          <p className="muted last">You can change them later under Sync settings. They change on every computer.</p>
+        </ConfirmSheet>
+      )
+    case 'clone-other':
+      return (
+        <ConfirmSheet title={`Download “${o.name}” to ${platform.here}?`} confirm="Choose where…" onConfirm={() => api.cloneOther(o.key)} onClose={onClose}>
+          <p className="first">
+            {from} syncs this repo, and {platform.here} has no copy yet. AutoSync downloads it from <span className="mono">{o.remoteUrl}</span> into a folder you
+            pick, then syncs it with these settings:
+          </p>
+          {settings}
+          <p className="muted last">A big repo can take a few minutes. Nothing is changed on {from} or on GitHub.</p>
+        </ConfirmSheet>
+      )
+    case 'hide-other':
+      return (
+        <ConfirmSheet title={`Hide “${o.name}” on ${platform.here}?`} confirm="Hide" onConfirm={() => api.hideOther(o.key)} onClose={onClose}>
+          <p className="first last">
+            It stays synced on {from}. It just won't show here. Settings → Show hidden repos brings it back.
+          </p>
+        </ConfirmSheet>
+      )
   }
 }
 

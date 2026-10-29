@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import { PAUSES } from '@shared/status'
 import type { FolderStatus, NavTarget } from '@shared/types'
 
 /**
@@ -16,6 +17,8 @@ export interface FolderMenuActions {
   openInTerminal(): void
   openInEditor(): void
   clearAlias(): void
+  /** D51: minutes, or null to resume now. */
+  pause(minutes: number | null): void
 }
 
 export interface FolderMenuContext {
@@ -35,6 +38,12 @@ export function folderMenuTemplate(folder: FolderStatus, ctx: FolderMenuContext,
       { label: 'Sync now', enabled: !ctx.paused && !ctx.gitMissing && folder.state !== 'off', click: () => actions.syncNow() },
       folder.enabled ? { label: 'Turn off syncing…', click: open({ sheet: 'folder-off' }) } : { label: 'Turn on syncing…', click: open({ sheet: 'folder-on' }) },
     ],
+    // D51: a pause for a while turns itself off; only an enabled folder has one.
+    folder.pausedUntil !== null
+      ? [{ label: 'Resume now', click: () => actions.pause(null) }]
+      : folder.enabled
+        ? PAUSES.map(([minutes, label]) => ({ label, click: () => actions.pause(minutes) }))
+        : [],
     [
       { label: 'Copy folder name', click: () => actions.copy(folder.name) },
       { label: 'Copy path', click: () => actions.copy(folder.path) },
@@ -53,5 +62,5 @@ export function folderMenuTemplate(folder: FolderStatus, ctx: FolderMenuContext,
     ],
     [{ label: 'Remove…', click: open({ sheet: 'remove' }) }],
   ]
-  return groups.flatMap((group, i) => [...(i === 0 ? [] : [{ type: 'separator' as const }]), ...group.filter((item): item is Item => item !== null)])
+  return groups.filter((g) => g.length > 0).flatMap((group, i) => [...(i === 0 ? [] : [{ type: 'separator' as const }]), ...group.filter((item): item is Item => item !== null)])
 }

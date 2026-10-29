@@ -1,7 +1,7 @@
 import type { PullRequestRef, TooBigFile } from '@shared/types'
 import { findGit, git, zList } from './exec'
 import type { GitHubRepo, PullRequest, RepoPolicy } from './github'
-import { CLEAN, commitMessage, countAhead, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
+import { CLEAN, commitMessage, countAhead, fileList, fromFailure, fromGhFailure, rebaseKeepingBoth, TRANSFER_TIMEOUT_MS, type Verdict } from './pass'
 import type { PassOptions } from './sync'
 
 /**
@@ -33,15 +33,6 @@ const branchOf = (sha: string): string => `autosync/${sha.slice(0, 12)}`
 
 const refOf = (pr: PullRequest): PullRequestRef => ({ number: pr.number, url: pr.url })
 
-/** How many files a PR body lists; a batch that touched thousands would otherwise hit GitHub's body limit. */
-const BODY_FILES = 50
-
-/** The batch's files, one per line, the rest counted. */
-function prBody(files: readonly string[]): string {
-  const lines = files.slice(0, BODY_FILES).map((f) => `- ${f}`)
-  if (files.length > BODY_FILES) lines.push(`- …and ${files.length - BODY_FILES} more`)
-  return lines.join('\n')
-}
 
 /** D25 "Send again": drop the closed batch's marker. Its commits stay, so the next pass sends them as a fresh PR. */
 export async function forgetInFlight(root: string): Promise<void> {
@@ -77,7 +68,7 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
       // S20: a batch no longer under HEAD (the user reset past it) replays nothing and is only forgotten — history is theirs.
       if ((await git(bin, root, ['merge-base', '--is-ancestor', batch, 'HEAD'])).code === 0) {
         opts.onDirection?.('down')
-        const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['--onto', '@{u}', batch])
+        const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['--onto', '@{u}', batch], opts.settings?.paths ?? null)
         if (stopped !== null) return stopped
       }
     }
@@ -90,7 +81,7 @@ export async function exchangeViaPr(bin: string, root: string, gh: GitHubRepo, p
   let [behind = 0, ahead = 0] = counts.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10) || 0)
   if (behind > 0) {
     opts.onDirection?.('down')
-    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'])
+    const stopped = await rebaseKeepingBoth(bin, root, opts.host, ['@{u}'], opts.settings?.paths ?? null)
     if (stopped !== null) return stopped
     ahead = await countAhead(bin, root)
   }
@@ -119,7 +110,7 @@ async function send(bin: string, root: string, gh: GitHubRepo, policy: RepoPolic
   if (found.value?.state === 'OPEN') return { ...CLEAN, fetched: true, tooBig, pr: refOf(found.value) }
   // Three dots: the batch's own files, measured from where it left the branch.
   const files = zList(await git(bin, root, ['diff', '--name-only', '-z', `@{u}...${batch}`]))
-  const created = await gh.createPr({ head: branch, base: policy.defaultBranch, title: commitMessage(opts.host, files), body: prBody(files) })
+  const created = await gh.createPr({ head: branch, base: policy.defaultBranch, title: commitMessage(opts.host, files), body: fileList(files) })
   if (!created.ok) return fromGhFailure(created.failure, tooBig, true)
   return { ...CLEAN, fetched: true, tooBig, pr: refOf(created.value) }
 }

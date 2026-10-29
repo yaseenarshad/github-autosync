@@ -1,4 +1,4 @@
-import type { AppStatus, FolderStatus, SyncState } from './types'
+import type { AppStatus, FolderStatus, PullEvery, PushEvery, RepoSettings, SyncState } from './types'
 
 /**
  * Status rules the window and the menu bar must agree on: the cadence, which state is worst, the
@@ -13,8 +13,14 @@ export const DEBOUNCE_MS = 30_000
 export const PR_QUIET_MS = 5 * 60_000
 /** While a batch's PR is open, how often a quiet pass checks whether it merged. */
 export const PR_CHECK_MS = 15_000
-/** A folder that ended level pulls again this often. */
+/** A folder that ended level pulls again this often (the default pull, D39). */
 export const POLL_MS = 60_000
+/** The unit of the per-repo push and pull settings (D37, D39). */
+export const MINUTE_MS = 60_000
+/** D38: Auto never waits longer than this after the first unsent change… */
+export const AUTO_CAP_MS = 5 * MINUTE_MS
+/** …nor, in PR mode, longer than this. */
+export const PR_CAP_MS = 30 * MINUTE_MS
 /** After an offline pass, the one quiet retry. */
 export const OFFLINE_RETRY_MS = 120_000
 /** Wake/unlock pulls, but not again within this of the last pass. */
@@ -28,6 +34,48 @@ export const OWN_WRITES_MS = 1_000
 export const SENDS_AFTER = `${DEBOUNCE_MS / 1000}s after you stop editing`
 export const OPENS_PR_AFTER = `${PR_QUIET_MS / 60_000} minutes after you stop editing`
 export const CHECKS_EVERY = POLL_MS === 60_000 ? 'every minute' : `every ${POLL_MS / 1000}s`
+
+// ---------- per-repo settings (D34, D37, D39) ----------
+
+/** A repo nobody has set up yet behaves exactly as before: send 30 s after edits, pull every minute, the whole repo. */
+export const DEFAULT_SETTINGS: RepoSettings = { push: 'auto', pull: 1, paths: null, beforePush: null }
+
+/** The push choices the window offers, in order (D37). Minutes in between. */
+export const PUSH_CHOICES: readonly PushEvery[] = ['auto', 5, 15, 30, 60, 240, 'manual']
+/** The pull choices the window offers, in order (D39). */
+export const PULL_CHOICES: readonly PullEvery[] = [1, 5, 15, 60, 'manual']
+
+/** `5 min`, `1 hour`, `4 hours`. */
+export const minutesLabel = (m: number): string => (m % 60 === 0 ? plural(m / 60, 'hour') : `${m} min`)
+
+export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after edits)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
+/** `1 h`, `5 min` — the short form for one-line summaries. */
+const short = (m: number): string => (m % 60 === 0 ? `${m / 60} h` : `${m} min`)
+
+/** One folded line for a repo's settings: `1 h push · 5 min pull · 2 folders · before-push command`. */
+export function settingsSummary(s: RepoSettings): string {
+  const push = s.push === 'auto' ? 'auto push' : s.push === 'manual' ? 'push by hand' : `${short(s.push)} push`
+  const pull = s.pull === 'manual' ? 'pull by hand' : `${short(s.pull)} pull`
+  const folders = s.paths === null ? 'whole repo' : s.paths.length === 1 ? (s.paths[0] ?? '') : `${s.paths.length} folders`
+  return [push, pull, folders, ...(s.beforePush === null ? [] : ['before-push command'])].join(' · ')
+}
+
+/** D52: the pull in a sentence — "checks GitHub every minute". */
+export const checksEvery = (p: PullEvery): string => (p === 'manual' ? 'only when you press Sync now' : p === 1 ? 'every minute' : `every ${minutesLabel(p)}`)
+
+export const pullLabel = (p: PullEvery): string => (p === 'manual' ? 'By hand only' : p === 1 ? 'Every minute' : `Every ${minutesLabel(p)}`)
+
+/** D44: the folders a commit may take; null is the whole repo. */
+export type Picks = readonly string[] | null
+
+/** D44: a repo-relative path inside the picks (a picked folder covers everything below it). */
+export const inPicks = (picks: Picks, rel: string): boolean => picks === null || picks.some((p) => rel === p || rel.startsWith(`${p}/`))
+
+/** D51: the pauses for a while that the folder menu and the folder page offer. */
+export const PAUSES: ReadonlyArray<readonly [number, string]> = [
+  [60, 'Pause for 1 hour'],
+  [240, 'Pause for 4 hours'],
+]
 
 // ---------- links ----------
 

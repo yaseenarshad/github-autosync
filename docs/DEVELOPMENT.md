@@ -5,13 +5,16 @@
 
 ## What it does to your repo
 
-- Commits on whatever branch is checked out, as `sync (<this computer>): a.md, b.md +2 more`.
+- Commits on whatever branch is checked out, as `sync (<this computer>): <shared folder> — a.md, b.md +2 more`, with every file in the body.
+- Each repo has its own push and pull timing and can sync only some of its folders (folder page → Sync settings). Pulls never push; AutoSync's own commits since the last push go as one.
+- A file with a `-wal` or `-journal` beside it (an open SQLite database) waits until that file is gone.
+- A repo can run a command before each push (for example `./save-for-git.sh`); if it fails, nothing is pushed.
 - Pulls by rebasing your unpushed commits onto GitHub's — never a merge commit.
 - The same file changed on two computers: GitHub's version stays, yours is kept beside it as `<name> (conflict <computer>, <date>)<ext>`. Syncing keeps going.
 - Files of 95 MiB or more are never committed (GitHub refuses them); they are listed as too big.
 - A repo mid-rebase, mid-merge or on a detached HEAD is left alone until you finish.
 - `.gitignore` is the only filter. What git ignores is not even watched, so a big ignored folder (a `.venv`, a build folder) costs nothing.
-- Settings live in the app's own `config.json` (macOS: `~/Library/Application Support/GitHub AutoSync/`); nothing is written into your folders.
+- Settings live in the app's own `config.json` (macOS: `~/Library/Application Support/GitHub AutoSync/`). With a settings folder (Settings → Settings folder), each computer also writes `settings-<id>.json` there, so the repos and their settings follow you to every computer.
 
 ## Team repos that require pull requests
 

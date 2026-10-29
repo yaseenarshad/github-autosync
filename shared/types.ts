@@ -9,8 +9,10 @@ export type SyncState = 'off' | 'synced' | 'pending' | 'syncing' | 'attention'
  * `busy-repo` = mid-rebase, mid-merge, detached HEAD, or a side branch of a PR-rule repo — AutoSync never touches it (D16, D29).
  * `no-gh` = the repo needs PRs and `gh` is missing or logged out (D28). `pr-closed` = a human closed the batch's PR (D25).
  * `other-app` = the Docs/Draw app syncs this folder too; AutoSync stands back (D27).
+ * `outside-changed` = a file outside the picked folders changed here and on GitHub; the pull waits for the user (D45).
+ * `before-push` = the repo's command before a push failed; nothing was committed or pushed (D49).
  */
-export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'error'
+export type AttentionKind = 'conflict' | 'auth' | 'no-git' | 'no-identity' | 'busy-repo' | 'no-gh' | 'pr-closed' | 'other-app' | 'outside-changed' | 'before-push' | 'error'
 
 /** Repo-relative paths: the original file and the `<name> (conflict <host>, <YYYY-MM-DD>)<ext>` copy beside it. */
 export interface ConflictPair {
@@ -22,10 +24,13 @@ export interface Attention {
   kind: AttentionKind
   /**
    * git's first `fatal:`/`error:` line for `error`/`auth`; `rebase` | `merge` | `detached` | `side-branch` for `busy-repo`;
-   * the PR's URL for `pr-closed`; `Docs` | `Draw` for `other-app`; gh's own words for `no-gh`.
+   * the PR's URL for `pr-closed`; `Docs` | `Draw` for `other-app`; gh's own words for `no-gh`;
+   * the command's last lines for `before-push`.
    */
   detail?: string
   conflicts?: ConflictPair[]
+  /** `outside-changed`: the repo-relative files changed on both sides (D45). */
+  files?: string[]
 }
 
 export type FileStatus = 'M' | 'A' | 'D' | 'R'
@@ -51,6 +56,21 @@ export interface PullRequestRef {
   url: string
 }
 
+/** D37: when a repo's changes are pushed — `auto` (30 s after the last edit, as D3), every N minutes, or only by hand. */
+export type PushEvery = 'auto' | 'manual' | number
+/** D39: how often a repo pulls — every N minutes, or only by hand. */
+export type PullEvery = 'manual' | number
+
+/** D34: one repo's settings. They travel between computers through the settings folder (D35). */
+export interface RepoSettings {
+  push: PushEvery
+  pull: PullEvery
+  /** D44: repo-relative folders to sync; null is the whole repo. */
+  paths: string[] | null
+  /** D49: a command run in the repo root before each send; null is none. */
+  beforePush: string | null
+}
+
 export interface FolderStatus {
   id: string
   /** Absolute path on this computer. */
@@ -69,14 +89,21 @@ export interface FolderStatus {
   remoteUrl: string | null
   /** `https://github.com/<owner>/<repo>` when origin is GitHub, else null. */
   webUrl: string | null
+  /** D34: the key its settings travel under (`github.com/<owner>/<repo>`); null until origin is known. */
+  repo: string | null
+  settings: RepoSettings
   /** `push` until the repo's rules are known to require PRs on this branch (D22). */
   publishVia: PublishVia
   /** Set while a batch's PR is open: the folder is `pending` until it merges (D26). */
   pr: PullRequestRef | null
   /** Changes on this computer that are not on GitHub yet: uncommitted + committed-but-unpushed. */
   pending: FileChange[]
+  /** D46: changes outside the picked folders — they stay here and never make the folder pending. */
+  outside: FileChange[]
   /** Never staged: ≥ 95 MiB (D11). */
   tooBig: TooBigFile[]
+  /** D48: databases held back while open (a `-wal` or `-journal` beside them); never pending. */
+  inUse: string[]
   /** Top-level `.gitignore` patterns and how many files git currently ignores (D10). */
   ignored: { patterns: string[]; count: number }
   /** The Docs/Draw app has its own sync switched on for this folder — AutoSync stands back (D27, `other-app`). */
@@ -92,6 +119,10 @@ export interface FolderStatus {
   sendAt: number | null
   /** When the single offline retry fires (D3). */
   retryAt: number | null
+  /** D52: when the next pull runs; null when none is armed (pulls by hand, or Auto's send is about to pull). */
+  pullAt: number | null
+  /** D51: off until then (ms epoch), then on again by itself; null when not paused for a while. */
+  pausedUntil: number | null
 }
 
 export interface AppStatus {
@@ -103,9 +134,45 @@ export interface AppStatus {
   launchAtLogin: boolean
   /** D19: `system` follows macOS/Windows; `light`/`dark` force the window's look. */
   theme: ThemeChoice
+  /** D35: the folder the settings travel through; null when none is chosen. */
+  settingsFolder: string | null
+  /** The chosen settings folder cannot be read or written right now; this computer keeps its own copy. */
+  settingsFolderMissing: boolean
+  /** Why the settings may travel slowly, or not at all, from this computer; null when they travel with each change. */
+  settingsFolderNote: string | null
+  /** D53: repos the other computers sync that this one does not have, hidden ones included. */
+  others: OtherRepo[]
+  /** Item 18: the computers in the settings folder, this one first; empty with no settings folder. */
+  computers: Array<{ name: string; savedAt: number | null; me: boolean }>
+  /** Item 19: what a repo starts with until someone changes its settings; stays on this computer. */
+  defaults: { push: PushEvery; pull: PullEvery }
 }
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
+
+/** D53: a repo another computer syncs and this one does not have. */
+export interface OtherRepo {
+  /** D34: its settings key. */
+  key: string
+  name: string
+  remoteUrl: string
+  /** The host names of the computers that sync it. */
+  computers: string[]
+  /** The other computer's path with this computer's home folder: where a clone most likely is. */
+  expectedPath: string
+  /** Where a clone of it is on this computer; null when none was found (D54: Clone…). */
+  found: string | null
+  /** D54: a clone is running. */
+  cloning: boolean
+  /** The last clone's failure in words; null when none. */
+  error: string | null
+  /** "Not on this Mac": hidden until Settings → Show hidden repos. */
+  hidden: boolean
+  /** Its remote says the repo is not there (deleted, renamed, or no access): there is nothing to download. */
+  gone: boolean
+  /** The settings it starts with when added here (D35): the newest any computer saved. */
+  settings: RepoSettings
+}
 
 /** D10: the Activity log is read from git history only. */
 export type ActivityKind = 'sent' | 'received' | 'conflict' | 'manual'

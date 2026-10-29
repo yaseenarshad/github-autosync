@@ -1,7 +1,7 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.test.ts (+ classifyGitFailure cases from sync.test.ts); changes: findGit, identity class, no installGitHint.
 import { afterEach, describe, expect, it } from 'vitest'
 import { rm } from 'node:fs/promises'
-import { GIT_CANDIDATES, GIT_TIMEOUT_CODE, classifyGitFailure, findGit, firstMeaningfulLine, git, gitCandidates, resolveBin, type GitResult } from './exec'
+import { GIT_CANDIDATES, GIT_TIMEOUT_CODE, classifyGitFailure, findGit, firstMeaningfulLine, git, gitCandidates, resolveBin, runCommand, type GitResult } from './exec'
 import { requireGit, tempDir as makeTemp } from './gitFixture'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -129,5 +129,31 @@ describe('firstMeaningfulLine', () => {
   it("prefers git's own fatal/error line over chatter", () => {
     expect(firstMeaningfulLine({ code: 1, stdout: '', stderr: 'hint: something\nerror: could not apply 1234... note\nhint: more' })).toBe('error: could not apply 1234... note')
     expect(firstMeaningfulLine({ code: 1, stdout: '', stderr: '' })).toBe('git exited 1')
+  })
+})
+
+describe('runCommand (D49)', () => {
+  it('answers null for exit 0, and the last lines with the exit code otherwise, on every OS', async () => {
+    const dir = await makeTemp('cmd')
+    try {
+      expect(await runCommand('exit 0', dir)).toBeNull()
+      expect(await runCommand('echo hello&& exit 1', dir)).toMatch(/hello[\s\S]*\(exit code 1\)$/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('stops a command that runs past its limit', async () => {
+    const dir = await makeTemp('cmd')
+    try {
+      expect(await runCommand('sleep 5', dir, 200)).toMatch(/stopped after 0.2 s/)
+      // A child the command started stops with it (the whole process group).
+      expect(await runCommand('sleep 30 & echo $! > child.pid; wait', dir, 300)).toMatch(/stopped after/)
+      const pid = Number((await import('node:fs/promises').then((fs) => fs.readFile(`${dir}/child.pid`, 'utf8'))).trim())
+      await new Promise((r) => setTimeout(r, 100))
+      expect(() => process.kill(pid, 0)).toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

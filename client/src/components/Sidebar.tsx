@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import type { AppStatus, FolderStatus } from '@shared/types'
+import type { AppStatus, FolderStatus, OtherRepo } from '@shared/types'
+import type { SheetState } from './Sheets'
 import { parentDir, tildify } from '../lib/format'
+import { platform } from '../lib/platform'
 import { headline } from '@shared/status'
 import { folderView } from '../lib/summary'
 import { Icon } from './Icon'
-import { Ago } from './Time'
+import { Ago, In } from './Time'
 
 interface Props {
   status: AppStatus
@@ -12,9 +14,11 @@ interface Props {
   home: string | null
   onSelect: (id: string | null) => void
   onAdd: () => void
+  /** D53, D54: Add, Clone… and hide open a sheet that explains and confirms first. */
+  onSheet: (sheet: SheetState) => void
 }
 
-export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
+export function Sidebar({ status, selected, home, onSelect, onAdd, onSheet }: Props) {
   const [filter, setFilter] = useState('')
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
   const q = filter.trim().toLowerCase()
@@ -67,7 +71,9 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
                 <div key={dir}>
                   <button className={`plain group ${isClosed ? 'closed' : ''}`} onClick={() => toggle(dir)}>
                     <Icon name="chev" className="ico chev" />
-                    <span className="gp">{tildify(dir, home)}</span>
+                    <span className="gp" title={dir}>
+                      {tildify(dir, home)}
+                    </span>
                     <span className="gc">{folders.length}</span>
                   </button>
                   {!isClosed &&
@@ -80,6 +86,7 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
             {q && groups.size === 0 && <div className="list-note">No folders match “{filter.trim()}”.</div>}
           </>
         )}
+        <OtherComputers others={status.others.filter((o) => !o.hidden)} home={home} onSheet={onSheet} />
       </div>
       <div className="side-foot">
         <button className="btn-quiet" onClick={onAdd}>
@@ -88,6 +95,55 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
         </button>
       </div>
     </aside>
+  )
+}
+
+/** D53, D54: repos the other computers sync and this one does not. Nothing turns on before a click. */
+function OtherComputers({ others, home, onSheet }: { others: OtherRepo[]; home: string | null; onSheet: (sheet: SheetState) => void }) {
+  const [closed, setClosed] = useState(false)
+  if (others.length === 0) return null
+  return (
+    <div className="others">
+      <button className={`plain group ${closed ? 'closed' : ''}`} onClick={() => setClosed(!closed)}>
+        <Icon name="chev" className="ico chev" />
+        <span>On your other computers</span>
+        <span className="gc">{others.length}</span>
+      </button>
+      {!closed &&
+        others.map((o) => (
+          <div className="other" key={o.key}>
+            <div className="min0">
+              <div className="name">{o.name}</div>
+              <div className={`sub ${o.gone ? 'warn' : ''}`} title={o.error ?? o.found ?? `On ${o.computers.join(', ')}`}>
+                {o.gone && <Icon name="alert" />}
+                {o.cloning
+                  ? 'Downloading…'
+                  : o.gone
+                    ? 'Gone from GitHub (or no access)'
+                    : o.error !== null
+                      ? o.error
+                      : o.found !== null
+                        ? `Already on this ${platform.machine}`
+                        : `Not on this ${platform.machine} yet`}
+              </div>
+            </div>
+            <div className="acts">
+              {o.gone ? null : o.found !== null ? (
+                <button className="btn" onClick={() => onSheet({ kind: 'add-other', key: o.key })}>
+                  Sync…
+                </button>
+              ) : (
+                <button className="btn" disabled={o.cloning} onClick={() => onSheet({ kind: 'clone-other', key: o.key })}>
+                  Download…
+                </button>
+              )}
+              <button className="x" aria-label={`Not on this computer: ${o.name}`} title="Not on this computer" onClick={() => onSheet({ kind: 'hide-other', key: o.key })}>
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+    </div>
   )
 }
 
@@ -117,7 +173,13 @@ function FolderRow({
       <div className="min0">
         <div className="name">{f.name}</div>
         <div className="sub">
-          {v.kind === 'synced' && f.lastSyncedAt !== null ? (
+          {v.kind === 'pending' && !f.offline && f.pr === null && f.settings.push === 'manual' ? (
+            'push by hand'
+          ) : v.kind === 'pending' && !f.offline && f.pr === null && f.settings.push !== 'auto' && f.sendAt !== null ? (
+            <>
+              push <In at={f.sendAt} />
+            </>
+          ) : v.kind === 'synced' && f.lastSyncedAt !== null ? (
             <>
               Synced <Ago at={f.lastSyncedAt} />
             </>

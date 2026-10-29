@@ -1,5 +1,5 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.ts; changes: GIT_EDITOR=true, `findGit`, no stdin `input`, failure classification moved here from sync.ts (+ identity), extra `env` (gh, D28).
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -135,6 +135,57 @@ export function git(bin: string, root: string, args: string[], opts: { timeoutMs
         reject(err)
       },
     )
+  })
+}
+
+/** D49: the limit on a before-push command. */
+export const COMMAND_TIMEOUT_MS = 120_000
+/** How many of a failed command's last lines the card shows (D49). */
+const COMMAND_TAIL_LINES = 20
+
+/**
+ * D49: the repo's own command before a send, in the repo root. On macOS through the user's login
+ * shell, so it finds what their terminal finds (an app opened from Finder has a bare PATH);
+ * on Windows through `cmd.exe`. Never throws: null when it exited 0, else its last lines (output and
+ * errors together) and why it stopped.
+ */
+export function runCommand(command: string, root: string, timeoutMs = COMMAND_TIMEOUT_MS): Promise<string | null> {
+  const windows = process.platform === 'win32'
+  const file = windows ? 'cmd.exe' : (process.env.SHELL ?? '/bin/sh')
+  const args = windows ? ['/d', '/s', '/c', `"${command}"`] : ['-l', '-c', command]
+  return new Promise((resolve) => {
+    // Its own process group (`detached`), so the limit stops the command's children too, not only the shell.
+    const child = spawn(file, args, { cwd: root, windowsHide: true, windowsVerbatimArguments: windows, detached: !windows, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    const take = (chunk: Buffer) => {
+      out = `${out}${chunk.toString('utf8')}`.slice(-MAX_BUFFER)
+    }
+    child.stdout.on('data', take)
+    child.stderr.on('data', take)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (child.pid === undefined) return
+      if (windows) spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true })
+      else {
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
+      }
+    }, timeoutMs)
+    let settled = false
+    const done = (why: string | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (why === null) return resolve(null)
+      const lines = out.trimEnd().split(/\r?\n/).filter((l) => l !== '').slice(-COMMAND_TAIL_LINES)
+      resolve([...lines, `(${why})`].join('\n'))
+    }
+    child.on('error', (err) => done(err.message))
+    child.on('close', (code) => done(timedOut ? `stopped after ${timeoutMs / 1000} s` : code === 0 ? null : `exit code ${code ?? 'unknown'}`))
   })
 }
 

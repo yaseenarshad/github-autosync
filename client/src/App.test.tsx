@@ -6,6 +6,7 @@ import type { ActivityPage, AppStatus, FolderVerdict, NavTarget } from '@shared/
 import { App } from './App'
 import { platform } from './lib/platform'
 import { makeEntry, makeFolder, makeStatus } from '@shared/testFixtures'
+import { clock } from '@shared/status'
 
 let root: Root
 let container: HTMLElement
@@ -30,6 +31,16 @@ function mockApi(status: AppStatus) {
     activity: vi.fn(async (): Promise<ActivityPage> => ({ entries: [], cursor: null })),
     setLaunchAtLogin: vi.fn(),
     setTheme: vi.fn(async () => status),
+    setRepoSettings: vi.fn(async () => status),
+    pickSettingsFolder: vi.fn(async (): Promise<string | null> => null),
+    setSettingsFolder: vi.fn(async () => status),
+    listFolders: vi.fn(async (_id: string, rel: string): Promise<string[]> => (rel === '' ? ['docs', 'app'] : [])),
+    pushOutside: vi.fn(async () => {}),
+    pauseFolder: vi.fn(async () => status),
+    addOther: vi.fn(async (): Promise<FolderVerdict> => ({ ok: true, path: '/x', warning: null, offline: false })),
+    cloneOther: vi.fn(async () => {}),
+    hideOther: vi.fn(async () => status),
+    setDefaults: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -264,6 +275,182 @@ describe('theme (D19)', () => {
   })
 })
 
+describe('sync settings (D34, D35)', () => {
+  async function change(select: HTMLSelectElement, value: string) {
+    await act(async () => {
+      select.value = value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
+  it('the folder page changes its repo push and pull, keeping the other fields', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
+    await change(document.querySelector('select[aria-label="Push"]')!, '60')
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 60, pull: 1, paths: null, beforePush: null })
+    await change(document.querySelector('select[aria-label="Pull"]')!, 'manual')
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 'manual', paths: null, beforePush: null })
+  })
+
+  it('waits for the first sync before a folder with an unknown repo can change them', async () => {
+    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', repo: null })]))
+    await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Push"]')!.disabled).toBe(true)
+  })
+
+  it('picks folders one level at a time and saves them; a parent covers its children (D44)', async () => {
+    const api = await mount(oneFolder)
+    api.listFolders.mockImplementation(async (_id: string, rel: string) => (rel === '' ? ['app', 'docs'] : rel === 'docs' ? ['docs/notes'] : []))
+    await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
+    await click(button('Choose folders…'))
+    await click(document.querySelectorAll<HTMLInputElement>('input[name="scope"]')[1]!)
+    expect(button('Save').disabled).toBe(true) // nothing picked yet
+
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Open docs"]')!)
+    await click(document.querySelector<HTMLInputElement>('input[aria-label="docs/notes"]')!)
+    await click(document.querySelector<HTMLInputElement>('input[aria-label="docs"]')!)
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="docs/notes"]')!.disabled).toBe(true)
+    await click(button('Save'))
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 1, paths: ['docs'], beforePush: null })
+  })
+
+  it('lists changes outside the picks, and Push these now asks first (D46)', async () => {
+    const outside = [{ status: 'M' as const, path: 'app/db.sqlite' }]
+    const api = await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', outside, settings: { push: 'auto', pull: 1, paths: ['docs'], beforePush: null } })]))
+    await click(button('notes'))
+    expect(document.body.textContent).toContain('Outside your synced folders')
+    await click(button('Push these now…'))
+    expect(api.pushOutside).not.toHaveBeenCalled()
+    await click(button('Push now'))
+    expect(api.pushOutside).toHaveBeenCalledWith('notes')
+  })
+
+  it('saves the command before each push with Enter, and Clear removes it (D49)', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Before each push"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, ' ./save-for-git.sh ')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 1, paths: null, beforePush: './save-for-git.sh' })
+  })
+
+  it('pauses a folder for an hour (D51)', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(button('1 hour'))
+    expect(api.pauseFolder).toHaveBeenCalledWith('notes', 60)
+  })
+
+  it('a folder paused for a while says until when, and Resume now ends it (D51)', async () => {
+    const paused = await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', state: 'off', pausedUntil: Date.now() + 3_600_000 })]))
+    await click(button('notes'))
+    expect(document.querySelector('.status .h')?.textContent).toMatch(/^Paused until /)
+    await click(button('Resume now'))
+    expect(paused.pauseFolder).toHaveBeenCalledWith('notes', null)
+  })
+
+  it('lists the other computers’ repos: Sync…, Download…, and Not on this computer (D53, D54)', async () => {
+    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false, gone: false, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } }
+    const others = [
+      { ...other, key: 'github.com/me/lab', expectedPath: '/Users/yasin/GitHub/lab', found: '/Users/yasin/GitHub/lab' },
+      { ...other, key: 'github.com/me/new', name: 'new', expectedPath: '/Users/yasin/GitHub/new', found: null },
+      { ...other, key: 'github.com/me/old', name: 'old', expectedPath: '/Users/yasin/GitHub/old', found: null, hidden: true },
+    ]
+    const api = await mount(makeStatus([], { others }))
+    expect(document.querySelector('.others')?.textContent).toContain('On your other computers')
+    expect(document.querySelector('.others')?.textContent).not.toContain('old')
+
+    api.addOther.mockResolvedValueOnce({ ok: false, path: '/Users/yasin/GitHub/lab', reason: 'auth' })
+    const inOthers = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('.others button')].find((b) => b.textContent === text)!
+    // Each one explains and asks first (D15): nothing happens before the confirm.
+    await click(inOthers('Sync…'))
+    expect(api.addOther).not.toHaveBeenCalled()
+    expect(dialog()?.textContent).toContain('Push: Every 1 hour')
+    await click(button('Start syncing'))
+    expect(api.addOther).toHaveBeenCalledWith('github.com/me/lab')
+    expect(dialog()?.textContent).toContain('Add') // the Add sheet shows why it failed
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    await click(inOthers('Download…'))
+    expect(api.cloneOther).not.toHaveBeenCalled()
+    await click(button('Choose where…'))
+    expect(api.cloneOther).toHaveBeenCalledWith('github.com/me/new')
+
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Not on this computer: new"]')!)
+    expect(api.hideOther).not.toHaveBeenCalled()
+    await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent === 'Hide')!)
+    expect(api.hideOther).toHaveBeenCalledWith('github.com/me/new')
+  })
+
+  it('folds Sync settings to one summary line, and folds What’s not syncing when nothing waits', async () => {
+    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ignored: { patterns: ['.venv/'], count: 12 }, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } })]))
+    await click(button('notes'))
+    const sums = [...document.querySelectorAll('.fold-sum')].map((e) => e.textContent)
+    expect(sums).toEqual(['12 files ignored by your .gitignore', '1 h push · 5 min pull · docs'])
+    expect(document.querySelector('select[aria-label="Push"]')).toBeNull()
+  })
+
+  it('the ⓘ beside the repo shows where the folder is, and copies its path', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Where this folder is"]')!)
+    expect(document.querySelector('.popover')?.textContent).toContain('/Users/yasin/Documents/GitHub/notes')
+    await click(button('Copy path'))
+    expect(api.copyText).toHaveBeenCalledWith('/Users/yasin/Documents/GitHub/notes')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    expect(document.querySelector('.popover')).toBeNull()
+  })
+
+  it('warns when the settings travel slowly, and marks a repo gone from GitHub (items 31, 35)', async () => {
+    const other = { key: 'k', name: 'dead', remoteUrl: 'https://github.com/me/dead.git', computers: ['Mac-Studio'], expectedPath: '/x', found: null, cloning: false, error: null, hidden: false, gone: true, settings: { push: 'auto' as const, pull: 1, paths: null, beforePush: null } }
+    await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/os/Sync', settingsFolderNote: 'The settings travel only every 1 hour, with the push of os.', others: [other] }))
+    expect(document.querySelector('.others')?.textContent).toContain('Gone from GitHub (or no access)')
+    expect([...document.querySelectorAll('.others button')].map((b) => b.textContent)).not.toContain('Download…')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    expect(dialog()?.textContent).toContain('The settings travel only every 1 hour, with the push of os.')
+  })
+
+  it('shows when a timer repo pushes in the sidebar and the overview, and lists the computers and the defaults in Settings (items 15, 16, 18, 19)', async () => {
+    const hourly = { push: 60, pull: 5, paths: null, beforePush: null }
+    const api = await mount(
+      makeStatus([makeFolder({ id: 'notes', name: 'notes', state: 'pending', pending: [{ status: 'M', path: 'a.md' }], sendAt: Date.now() + 42 * 60_000 + 5_000, lastSyncedAt: Date.now(), settings: hourly })], {
+        settingsFolder: '/Users/yasin/os/Sync',
+        computers: [
+          { name: 'MacBook-Pro', savedAt: Date.now(), me: true },
+          { name: 'Mac-Studio', savedAt: null, me: false },
+        ],
+      }),
+    )
+    expect(document.querySelector('.sidebar')?.textContent).toContain('push in 43m')
+    expect(document.querySelector('.ov-row .ds')?.textContent).toContain('next push in 43m · 1 h push · 5 min pull · whole repo')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    expect(dialog()?.textContent).toContain('Mac-Studio · nothing saved yet')
+    const pull = document.querySelector<HTMLSelectElement>('select[aria-label="Default pull"]')!
+    await act(async () => {
+      pull.value = '15'
+      pull.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(api.setDefaults).toHaveBeenCalledWith({ push: 'auto', pull: 15 })
+  })
+
+  it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
+    const api = await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/Sync/autosync' }))
+    api.pickSettingsFolder.mockResolvedValue('/Users/yasin/Sync/other')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    await click(button('Choose…'))
+    expect(api.setSettingsFolder).toHaveBeenCalledWith('/Users/yasin/Sync/other')
+    await click(button('Stop sharing'))
+    expect(api.setSettingsFolder).toHaveBeenLastCalledWith(null)
+  })
+})
+
 describe('folder page wording', () => {
   // Fixed clock so the countdowns read exactly.
   const at = new Date(2026, 8, 27, 12).getTime()
@@ -291,6 +478,17 @@ describe('folder page wording', () => {
   it('pending, with the send counting down', async () => {
     await show({ state: 'pending', pending: [change, change], sendAt: at + 23_000 })
     expect(text('.status .s')).toBe('Sends in 0:23 — 30s after you stop editing.')
+  })
+
+  it('a timer repo says when it sends and when it next checks, and offers Push now (D52)', async () => {
+    await show({ state: 'pending', pending: [change], sendAt: at + 42 * 60_000 + 10_000, pullAt: at + 192_000, settings: { push: 60, pull: 5, paths: null, beforePush: null } })
+    expect(text('.status .s')).toBe(`Sends at ${clock(at + 42 * 60_000 + 10_000)} (in 42:10) · next check in 3:12`)
+    expect(button('Push now')).toBeTruthy()
+  })
+
+  it('a repo pushed by hand says so', async () => {
+    await show({ state: 'pending', pending: [change], pullAt: at + 60_000, settings: { push: 'manual', pull: 1, paths: null, beforePush: null } })
+    expect(text('.status .s')).toBe('You push this repo by hand — press Push now to send · next check in 1:00')
   })
 
   it('a pull-request folder counts down to opening its PR (D24)', async () => {

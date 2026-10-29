@@ -47,6 +47,7 @@ describe('countdown', () => {
   it('rounds up to whole seconds as m:ss', () => {
     expect(countdown(now + 22_100, now)).toBe('0:23')
     expect(countdown(now + 102 * SECOND, now)).toBe('1:42')
+    expect(countdown(now + HOUR + 2 * MINUTE + 5 * SECOND, now)).toBe('1:02:05')
   })
   it('stops at 0:00', () => {
     expect(countdown(now - SECOND, now)).toBe('0:00')

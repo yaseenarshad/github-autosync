@@ -47,8 +47,17 @@ export function dayName(t: number, now: number): string {
   return new Date(t).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
-/** Time left until `at` as "m:ss"; "0:00" once it has passed. */
+/** Time left until `at` as "m:ss", or "h:mm:ss" from an hour up (D52); "0:00" once it has passed. */
 export function countdown(at: number, now: number): string {
   const s = Math.max(0, Math.ceil((at - now) / SECOND))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const ss = String(s % 60).padStart(2, '0')
+  if (s < 3600) return `${Math.floor(s / 60)}:${ss}`
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${ss}`
+}
+
+/** "in 42m", "in 1h 5m", "in <1m": how long until `at`, for a line that is read at a glance (item 15). */
+export function inShort(at: number, now: number): string {
+  const m = Math.ceil((at - now) / MINUTE)
+  if (m <= 1) return 'in <1m'
+  return m < 60 ? `in ${m}m` : `in ${Math.floor(m / 60)}h${m % 60 === 0 ? '' : ` ${m % 60}m`}`
 }

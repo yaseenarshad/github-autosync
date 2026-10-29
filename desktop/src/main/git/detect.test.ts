@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { git } from './exec'
-import { checkFolder, otherApp, readConflicts, readIgnored, readPending, repoState, webUrlOf } from './detect'
+import { checkFolder, otherApp, readConflicts, readIgnored, readPending, listSubfolders, repoKey, repoState, webUrlOf } from './detect'
 import { clone, makeBareRemote, makeGitRepo, pushedRepo, REAL_GIT_TIMEOUT_MS, requireGit, tempDir, wireOrigin, type GitRepo } from './gitFixture'
 
 // Real git throughout; the spy only lets one test fake GitHub's answer to `ls-remote`.
@@ -157,6 +157,36 @@ describe('readConflicts', { timeout: REAL_GIT_TIMEOUT_MS }, () => {
       { original: 'a.md', copy: 'a (conflict Mac-B, 2026-09-27).md' },
       { original: 'docs/Plan.txt', copy: 'docs/Plan (conflict Mac-A, 2026-09-27 2).txt' },
     ])
+  })
+})
+
+describe('listSubfolders (D44)', () => {
+  it('lists one level, sorted, without .git and without what git ignores', async () => {
+    const repo = await makeGitRepo()
+    try {
+      await repo.write('.gitignore', 'node_modules/\nbuild\n')
+      for (const f of ['docs/a.md', 'docs/deep/b.md', 'node_modules/x/i.js', 'build/out.js', 'app/main.ts', 'README.md']) await repo.write(f, 'x\n')
+      expect(await listSubfolders(bin, repo.root, '')).toEqual(['app', 'docs'])
+      expect(await listSubfolders(bin, repo.root, 'docs')).toEqual(['docs/deep'])
+      expect(await listSubfolders(bin, repo.root, 'docs/deep')).toEqual([])
+      // More folders than one `check-ignore` call takes (item 33): every batch is asked.
+      for (let i = 0; i < 450; i += 1) await repo.write(`many/f${String(i).padStart(3, '0')}/x.md`, 'x\n')
+      await repo.write('.gitignore', 'node_modules/\nbuild\nmany/f44*/\n')
+      const many = await listSubfolders(bin, repo.root, 'many')
+      expect(many).toHaveLength(440)
+      expect(many).not.toContain('many/f440')
+    } finally {
+      await repo.cleanup()
+    }
+  })
+})
+
+describe('repoKey (D34)', () => {
+  it('gives every spelling of a GitHub origin one lower-case key, and any other origin its own', () => {
+    for (const url of ['https://github.com/Acme/Lab.git', 'git@github.com:acme/lab.git', 'ssh://git@github.com/ACME/lab', 'https://token@github.com/acme/Lab/']) {
+      expect(repoKey(url)).toBe('github.com/acme/lab')
+    }
+    expect(repoKey(' /srv/git/lab.git ')).toBe('/srv/git/lab.git')
   })
 })
 

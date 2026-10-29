@@ -1,8 +1,10 @@
+import { clock, MINUTE_MS } from '@shared/status'
 import type { AppStatus, Attention, AttentionKind, FolderStatus } from '@shared/types'
 
 /**
  * D7: when to interrupt the user. Only for things they have to act on — a folder ENTERING
- * attention, or changes that have not reached GitHub for an hour — and never on success. Each
+ * attention, or changes that have not reached GitHub an hour after their push was due (D43) — and
+ * never on success. Each
  * fires once per episode: a folder stuck on `auth` for a day says so once, not every pass.
  *
  * Pure: the rules see `AppStatus` snapshots and answer what to show; the Electron `Notification`
@@ -16,6 +18,16 @@ export interface Notice {
 }
 
 export const PENDING_NOTICE_MS = 60 * 60 * 1000
+
+/**
+ * D43: when unsent changes are worth a notice — an hour after their push was due. Auto is due at
+ * once; a timer is due `push` minutes after the first change; by hand never is.
+ */
+export function overdueAt(f: FolderStatus): number | null {
+  const { push } = f.settings
+  if (f.pendingSince === null || push === 'manual') return null
+  return f.pendingSince + (push === 'auto' ? 0 : push * MINUTE_MS) + PENDING_NOTICE_MS
+}
 
 interface Seen {
   kind: AttentionKind | null
@@ -46,6 +58,12 @@ function attentionBody(attention: Attention): string {
       return 'Its pull request was closed without merging. Syncing is waiting for you.'
     case 'other-app':
       return `Also synced by the ${attention.detail ?? 'other'} app, so AutoSync leaves it alone.`
+    case 'before-push':
+      return 'The command before each push failed. Nothing was pushed.'
+    case 'outside-changed': {
+      const files = attention.files ?? []
+      return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, and AutoSync holds ${files.length === 1 ? 'it' : 'them'} back. Syncing is waiting for you.`
+    }
     case 'error':
       return `Syncing has stopped: ${attention.detail ?? 'git failed'}`
   }
@@ -65,8 +83,15 @@ export function createNoticeRules(): (status: AppStatus, now: number) => Notice[
     if (f.attention !== null && (kind !== mem.kind || grew)) out.push({ folderId: f.id, title: f.name, body: attentionBody(f.attention) })
     mem.kind = kind
     mem.copies = copies
-    if (f.pendingSince !== null && now - f.pendingSince >= PENDING_NOTICE_MS && mem.pendingSince !== f.pendingSince) {
-      const body = f.pr !== null ? `Changes have been waiting on pull request #${f.pr.number} for over an hour.` : 'Changes on this computer have not reached GitHub for over an hour.'
+    const overdue = overdueAt(f)
+    if (overdue !== null && now >= overdue && mem.pendingSince !== f.pendingSince) {
+      const due = overdue - PENDING_NOTICE_MS
+      const body =
+        f.pr !== null
+          ? `Changes have been waiting on pull request #${f.pr.number} for over an hour.`
+          : f.settings.push === 'auto'
+            ? 'Changes on this computer have not reached GitHub for over an hour.'
+            : `Changes due on GitHub at ${clock(due)} have not reached it, an hour later.`
       out.push({ folderId: f.id, title: f.name, body })
       mem.pendingSince = f.pendingSince
     }

@@ -28,6 +28,7 @@ async function commit(r: GitRepo, subject: string, files: Record<string, string>
 describe('classify', () => {
   it('reads the host out of a sync subject: this computer sent it, any other received', () => {
     expect(classify('sync (Mac-A): a.md', 'Yasin', [], 'Mac-A')).toEqual({ kind: 'sent', host: 'Mac-A' })
+    expect(classify('sync (Mac-A): yaseen/docs — a.md, b.md +1 more', 'Yasin', [], 'Mac-A')).toEqual({ kind: 'sent', host: 'Mac-A' }) // D50
     expect(classify('sync (Mac-B)', 'Yasin', [], 'Mac-A')).toEqual({ kind: 'received', host: 'Mac-B' })
   })
 

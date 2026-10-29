@@ -1,4 +1,4 @@
-import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, ThemeChoice } from './types'
+import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, PullEvery, PushEvery, RepoSettings, ThemeChoice } from './types'
 
 /**
  * Everything the renderer can ask of the main process, exposed by the preload as `window.autosync`.
@@ -27,6 +27,26 @@ export interface AutoSyncApi {
   activity(id: string, cursor?: number): Promise<ActivityPage>
   setLaunchAtLogin(on: boolean): Promise<AppStatus>
   setTheme(theme: ThemeChoice): Promise<AppStatus>
+  /** D34: the folder's repo gets these settings, on every computer (D35). Throws while its origin is unknown. */
+  setRepoSettings(id: string, settings: RepoSettings): Promise<AppStatus>
+  /** D35: the native picker for the settings folder; null when cancelled. */
+  pickSettingsFolder(): Promise<string | null>
+  /** D35: null stops sharing; this computer keeps its own copy. */
+  setSettingsFolder(path: string | null): Promise<AppStatus>
+  /** D44: the folder picker — the folders right under `rel` ('' is the top), without what git ignores. */
+  listFolders(id: string, rel: string): Promise<string[]>
+  /** D46: one send that also takes the changes outside the picked folders; resolves when it is done. */
+  pushOutside(id: string): Promise<void>
+  /** D51: off for `minutes`, then on again by itself; null resumes now. */
+  pauseFolder(id: string, minutes: number | null): Promise<AppStatus>
+  /** D53: adds the clone found for another computer's repo, with its settings. Answers the Add folder checks (D12): not ok → nothing was added. */
+  addOther(key: string): Promise<FolderVerdict>
+  /** D54: picks a parent folder, clones the repo into it and adds it. Progress and failure show in `others`. */
+  cloneOther(key: string): Promise<void>
+  /** Item 19: the push and pull a repo starts with until someone changes its settings. */
+  setDefaults(defaults: { push: PushEvery; pull: PullEvery }): Promise<AppStatus>
+  /** D53: "Not on this Mac"; null shows every hidden repo again. */
+  hideOther(key: string | null): Promise<AppStatus>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */
