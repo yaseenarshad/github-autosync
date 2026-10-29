@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, PullEvery, PushEvery, RepoSettings } from '@shared/types'
 import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel } from '@shared/status'
+import { Fold } from './Fold'
 import { platform } from '../lib/platform'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
@@ -20,11 +21,17 @@ export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderSta
       ? `Saved on ${platform.here} only. Choose a settings folder in Settings to use them on every computer.`
       : 'The same on every computer that syncs this repo.'
 
+  const summary = `Push ${pushLabel(f.settings.push).toLowerCase()} · pull ${pullLabel(f.settings.pull).toLowerCase()} · ${f.settings.paths === null ? 'whole repo' : f.settings.paths.join(', ')}${f.settings.beforePush === null ? '' : ` · ${f.settings.beforePush}`}`
   return (
-    <div className="section">
-      <h2>
-        Sync settings <Info text={where} />
-      </h2>
+    <Fold
+      auto={false}
+      title={
+        <>
+          Sync settings <Info text={where} />
+        </>
+      }
+      summary={summary}
+    >
       <div className="kv">
         <div className="kv-row two">
           <Field label="Push" info="When your changes go to GitHub. Auto: 30s after you stop editing. A time: once, that long after your first change.">
@@ -58,7 +65,7 @@ export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderSta
         </div>
         <BeforePush folder={f} known={known} save={save} />
       </div>
-    </div>
+    </Fold>
   )
 }
 

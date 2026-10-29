@@ -9,6 +9,7 @@ import { ActivityLog } from './ActivityLog'
 import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
+import { Fold } from './Fold'
 import { SyncSettings } from './SyncSettings'
 import { Countdown, LastSynced } from './Time'
 
@@ -405,9 +406,13 @@ function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus
   const ignored = f.ignored.patterns.length > 0 || f.ignored.count > 0
   const count = f.pending.length + f.outside.length + f.inUse.length + f.tooBig.length + (ignored ? 1 : 0)
 
+  const waiting = f.pending.length + f.outside.length + f.inUse.length + f.tooBig.length
   return (
-    <div className="section">
-      <h2>What's not syncing {count > 0 && <span className="n">{count}</span>}</h2>
+    <Fold
+      auto={waiting > 0}
+      title={<>What's not syncing {count > 0 && <span className="n">{count}</span>}</>}
+      summary={waiting > 0 ? `${plural(waiting, 'file')} waiting or held back` : ignored ? `${f.ignored.count.toLocaleString()} files ignored by your .gitignore` : 'Nothing — every file is on GitHub'}
+    >
       <div className="tbl">
         {count === 0 && (
           <div className="tr">
@@ -465,7 +470,7 @@ function NotSyncing({ folder: f, view, paused, onSheet }: { folder: FolderStatus
           </div>
         )}
       </div>
-    </div>
+    </Fold>
   )
 }
 

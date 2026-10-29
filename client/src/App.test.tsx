@@ -285,6 +285,7 @@ describe('sync settings (D34, D35)', () => {
   it('the folder page changes its repo push and pull, keeping the other fields', async () => {
     const api = await mount(oneFolder)
     await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
     await change(document.querySelector('select[aria-label="Push"]')!, '60')
     expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 60, pull: 1, paths: null, beforePush: null })
     await change(document.querySelector('select[aria-label="Pull"]')!, 'manual')
@@ -294,6 +295,7 @@ describe('sync settings (D34, D35)', () => {
   it('waits for the first sync before a folder with an unknown repo can change them', async () => {
     await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', repo: null })]))
     await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
     expect(document.querySelector<HTMLSelectElement>('select[aria-label="Push"]')!.disabled).toBe(true)
   })
 
@@ -301,6 +303,7 @@ describe('sync settings (D34, D35)', () => {
     const api = await mount(oneFolder)
     api.listFolders.mockImplementation(async (_id: string, rel: string) => (rel === '' ? ['app', 'docs'] : rel === 'docs' ? ['docs/notes'] : []))
     await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
     await click(button('Choose folders…'))
     await click(document.querySelectorAll<HTMLInputElement>('input[name="scope"]')[1]!)
     expect(button('Save').disabled).toBe(true) // nothing picked yet
@@ -327,6 +330,7 @@ describe('sync settings (D34, D35)', () => {
   it('saves the command before each push with Enter, and Clear removes it (D49)', async () => {
     const api = await mount(oneFolder)
     await click(button('notes'))
+    await click(button('Sync settings')) // folded by default
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Before each push"]')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, ' ./save-for-git.sh ')
@@ -373,6 +377,14 @@ describe('sync settings (D34, D35)', () => {
     expect(api.cloneOther).toHaveBeenCalledWith('github.com/me/new')
     await click(document.querySelector<HTMLButtonElement>('button[aria-label="Not on this computer: new"]')!)
     expect(api.hideOther).toHaveBeenCalledWith('github.com/me/new')
+  })
+
+  it('folds Sync settings to one summary line, and folds What’s not syncing when nothing waits', async () => {
+    await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ignored: { patterns: ['.venv/'], count: 12 }, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } })]))
+    await click(button('notes'))
+    const sums = [...document.querySelectorAll('.fold-sum')].map((e) => e.textContent)
+    expect(sums).toEqual(['12 files ignored by your .gitignore', 'Push every 1 hour · pull every 5 min · docs'])
+    expect(document.querySelector('select[aria-label="Push"]')).toBeNull()
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
