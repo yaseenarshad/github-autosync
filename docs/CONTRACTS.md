@@ -10,10 +10,10 @@ How the app behaves, in one place. The code is the source of truth; this names w
 ## 1. Status model
 
 - Each folder has one `SyncState`, set by `manager.ts` `stateOf`, in this order:
-  - `off` — the folder is disabled, or the app is paused (`AppStatus.paused` says which).
+  - `off` — the folder is disabled, paused for a while (`pausedUntil`, D51), or the app is paused (`AppStatus.paused` says which).
   - `syncing` — a pass is running. `direction` is `down` while receiving, `up` while sending. The quiet idle poll never shows as `syncing`.
   - `attention` — the user has to act (`attention` says why).
-  - `pending` — changes are waiting for the debounce, the folder is offline, `pending` is not empty, or a batch's PR is open (D26).
+  - `pending` — changes are waiting for their push (D37), the folder is offline, `pending` is not empty, or a batch's PR is open (D26).
   - `synced` — level with GitHub.
 - `AttentionKind` values:
   - `conflict` — derived from the tree: any tracked `<name> (conflict <host>, <YYYY-MM-DD>[ n])<ext>` file. It does **not** stop syncing (D6), and it clears on every computer once the copies are deleted.
@@ -24,6 +24,8 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `no-gh` — the repo requires PRs and `gh` is missing or logged out (`detail`: gh's words, D28).
   - `pr-closed` — a human closed the batch's PR without merging (`detail`: its URL). Never re-sent on its own; "Send again" is `resendPullRequest` (D25).
   - `other-app` — the Docs or Draw app syncs this folder too (`detail`: `Docs` | `Draw`). AutoSync makes zero writes until its switch is off (D27).
+  - `outside-changed` — a file outside the picked folders changed here and on GitHub (`files`). The pass stops before the rebase; neither side is touched (D45).
+  - `before-push` — the repo's command before a push failed (`detail`: its last 20 lines and why it stopped). Nothing was committed or pushed (D49).
   - `error` — anything else, in git's own words.
 - Other folder fields:
   - `publishVia` — `pr` when the repo's rules require PRs on its default branch and the folder is on it, else `push` (D22).
@@ -35,6 +37,11 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `lastSyncedAt` — the last pass that ended level with origin (in PR mode: the batch merged and landed).
   - `lastCheckedAt` — the last successful fetch.
   - `tooBig` — files of 95 MiB or more that are held back (D11). They are never counted in `pending`.
+  - `inUse` — databases held back while a `-wal` or `-journal` file is beside them (D48). Never in `pending`.
+  - `outside` — changes outside the picked folders (D46). Never in `pending`; they start no push.
+  - `repo` and `settings` — the folder's settings key and its repo's settings (D34).
+  - `pullAt` — when the next pull runs (D52). `pausedUntil` — the end of a pause for a while (D51).
+- `AppStatus` also carries `settingsFolder`, `settingsFolderMissing` (D35) and `others`: the repos the other computers sync and this one does not (D53).
 - Worst state, used for the menu bar icon, the toolbar dot and sorting: attention > pending > syncing > synced > off (`byWorst`). Paused overrides everything in the menu bar.
 - Summary line (`headline`), the same in the window and the menu bar, first match wins:
   - `No folders yet`
@@ -67,6 +74,12 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `openExternal` — opens `https://github.com/…` only.
   - `copyText`
   - `showFolderMenu` — the native right-click menu (D18).
+  - `setRepoSettings(id, settings)` — the folder's repo gets these settings on every computer (D34, D35). Throws while its origin is unknown.
+  - `pickSettingsFolder`, `setSettingsFolder(path | null)` — the settings folder (D35).
+  - `listFolders(id, rel)` — the folder picker, one level at a time, without what git ignores (D44).
+  - `pushOutside(id)` — one send with the whole repo, the files outside the picks included (D46).
+  - `pauseFolder(id, minutes | null)` — a pause for a while; null resumes now (D51).
+  - `addOther(key)`, `cloneOther(key)`, `hideOther(key | null)` — the other computers' repos (D53, D54).
 - Confirmations (D15) live in the renderer; the API acts immediately. The menu bar and the folder menu only open sheets. AI prompt texts live in the renderer, so the "Copy AI prompt" menu item navigates with `copyPrompt: true`.
 
 ## 3. Sync algorithm (`sync.ts`, one pass that never throws)
@@ -74,19 +87,21 @@ How the app behaves, in one place. The code is the source of truth; this names w
 1. **Refuse** with zero writes, in this order: a busy repo (D16), a folder the Docs/Draw app syncs (D27), a repo with no `origin`.
    - Then the **rules** (D22): the manager's last known `policy`, else `github.repo(origin).policy()` (the repo's rulesets). Not GitHub, gh could not say, or the quit flush (which never asks GitHub) → push mode, not cached.
    - Rules require PRs and the folder is not on the default branch → `busy-repo` `side-branch`, zero writes (D29).
-2. **Commit.** Untracked and modified files of 95 MiB or more are excluded from `add -A` by literal pathspec, so they are never hashed. Anything staged over the line afterwards is unstaged. The rest becomes one commit, `sync (<host>): a.md, b.md, c.md +N more`.
+0. **Before-push command** (D49): on a send pass (not a quiet pass, not the quit flush), the repo's `beforePush` runs in the repo root — the login shell on macOS, `cmd.exe` on Windows, 2 min limit. A failure is `before-push`, and the pass stops.
+2. **Commit.** Only the picked folders are staged, when the repo has picks (D44). Untracked and modified files of 95 MiB or more (D11), and databases with a `-wal`/`-journal` beside them (D48), are excluded from `add -A` by literal pathspec, so they are never hashed. Anything staged over the line afterwards is unstaged. The rest becomes one commit, `sync (<host>): <shared folder> — a.md, b.md, c.md +N more`, with every file in the body (D50).
    - A failed `add` is asked again, three times in all: a file being written while git reads it fails the whole add and stages nothing.
 3. **Fetch** `origin` (10-minute transfer budget). Skipped on the quit flush.
 4. **Rebase** onto `@{u}` when behind, never merge.
+   - With picks, first compare the changes outside them with `HEAD...@{u}`: a file on both sides is `outside-changed`, and the pass stops (D45). Otherwise the outside changes are parked around the rebase like the held-back files.
    - The fetch takes seconds, so each try first asks again whether the repo is busy (a merge or rebase started meanwhile → `busy-repo`, nothing more is written, D16), then commits whatever was saved since step 2, then rebases at once. A late save replays with the rest and is never stashed (D30).
    - Three tries, then one more commit decides. Nothing new to commit: the rebase failed for another reason, `error` in git's words. Something new: the tree is still being written, so the pass ends quietly — no attention, not level, the saves committed — and the next pass replays them (D31).
    - A rebase git refused to begin is not settled or aborted: the save under it stays on disk as it is.
    - What is ours to push is counted after the rebase.
-   - A held-back tracked file is stashed around the rebase and copied back afterwards. The stash is only restored and dropped if `refs/stash` moved, so the user's own stashes are never touched.
+   - A held-back tracked file (too big, in use, or outside the picks) is stashed around the rebase and copied back afterwards. The stash is only restored and dropped if `refs/stash` moved, so the user's own stashes are never touched.
    - Same-file conflicts are resolved with keep-both (`resolve.ts`): GitHub's version stays at the path and this computer's goes beside it as the conflict copy. When one side deleted the file and the other edited it, the edit wins.
    - Saves made while the rebase was stopped are parked and put back.
    - Anything unexpected aborts the rebase back to the starting tree.
-5. **Push.** `-u origin HEAD` on the first push. A push that lost a race to another computer re-runs the exchange once. The quit flush uses a 5 s push cap.
+5. **Push.** Never on a quiet pass (D40): it ends with its commits here. Before a push, AutoSync's own unpushed commits fold into one when every one of them is `sync (<this host>)` (D41). `-u origin HEAD` on the first push. A push that lost a race to another computer re-runs the exchange once. The quit flush uses a 5 s push cap.
    - A push refused by a ruleset (`GH013`, "…through a pull request") re-reads the rules in the same pass (not on the quit flush): PRs required → the PR route now (or `side-branch`); gh cannot say → its failure, classified as in 7 below (`no-gh` when it is missing or logged out).
 6. **Classify failures.**
    - A timeout counts as offline.
@@ -111,10 +126,11 @@ How the app behaves, in one place. The code is the source of truth; this names w
 
 ## 4. Triggers and cadence (`manager.ts`, numbers in `shared/status.ts`)
 
-- **Start / enable / resume:** a pass right away.
+- **Per repo** (D34): `push` is Auto (as below), a fixed timer of 5 min to 4 h from the first unsent change (D37), or by hand. `pull` is every 1 to 60 min (`MINUTE_MS`) or by hand (D39). Changing either re-times at once.
+- **Start / enable / resume:** a pass right away: a send in Auto, a quiet pass otherwise.
 - **Edits:** a watcher event is only a hint.
   - After a 1 s settle (`PEEK_MS`), `git status` decides.
-  - Real changes mark the folder pending and arm a 30 s trailing debounce (`DEBOUNCE_MS`).
+  - Real changes inside the picks mark the folder pending and arm the push: in Auto a 30 s trailing debounce (`DEBOUNCE_MS`), never later than 5 min after the first change (`AUTO_CAP_MS`, D38); a fixed timer otherwise (D37). Changes outside the picks only update `outside` (D47).
   - A clean look (an ignored file, or an edit undone) cancels the send.
 - **What the watcher skips** (D33): what git ignores, from `git status --ignored=matching`, plus `.git` and `node_modules` always.
   - One recursive OS watch per folder (FSEvents, ReadDirectoryChangesW). Events under ignored paths are dropped in the app.
@@ -123,11 +139,12 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - A new ignored file can start one peek before the list catches up. After that it is silent.
 - **Own writes:** watcher events during a pass, or within 1 s of one (`OWN_WRITES_MS`), are ignored. An edit made during a pass is caught by the pass's closing status.
 - **Offline:** exactly one retry after 2 min (`OFFLINE_RETRY_MS`).
-- **Idle:** a pass that ended level arms a quiet pull after 60 s (`POLL_MS`). Conflict copies do not stop it, nor do the zero-write refusals the user settles outside the app (`pr-closed`, `other-app`, `busy-repo`): the poll is how the folder notices. Any other attention (`no-gh`, `auth`, `no-identity`, `error`), offline, or edits that are settling do.
-- **Wake / unlock:** a pull, unless a pass ran in the last 10 s (`WAKE_COOLDOWN_MS`).
-- **Quit:** the watchers close, then each folder gets a flush pass (commit plus a capped push; commit only in PR mode). The quit is held for at most 15 s.
+- **Pulls:** every pass arms the next quiet pull (`settings.pull` minutes, D39), also while changes wait. In Auto the pull stands down while a send is armed. A quiet pass commits here and never pushes (D40). Conflict copies do not stop it, nor do the zero-write refusals the user settles outside the app (`pr-closed`, `other-app`, `busy-repo`): the poll is how the folder notices. Any other attention (`no-gh`, `auth`, `no-identity`, `error`), offline, or edits that are settling do.
+- **Wake / unlock:** a pull, unless a pass ran in the last 10 s (`WAKE_COOLDOWN_MS`). It sends only in Auto, and does nothing when pulls are by hand (D39).
+- **Pause for a while** (D51): off until `pausedUntil`, then on again with a pass.
+- **Quit:** the watchers close, then each folder gets a flush pass (commit plus a capped push; commit only in PR mode), except a repo pushed by hand (D42). The quit is held for at most 15 s.
 - **PR mode** (D24, D26):
-  - The debounce is 5 min (`PR_QUIET_MS`): one PR per sitting, not per save.
+  - The debounce is 5 min (`PR_QUIET_MS`), capped at 30 min (`PR_CAP_MS`): one PR per sitting, not per save. A fixed push timer opens the PR at its time.
   - Quiet passes (the idle poll and the PR check) never send. They may land a merged batch and receive; one that leaves changes unsent arms the debounce.
   - While a PR is open, a quiet check runs every 15 s (`PR_CHECK_MS`) instead of the idle poll.
   - An edit while a PR is open arms no debounce: the PR check commits it, and landing the batch arms the send.
@@ -138,11 +155,13 @@ How the app behaves, in one place. The code is the source of truth; this names w
 
 ## 5. Persistence
 
-- `<userData>/config.json` (D5): `{ version: 1, folders: [{ id, path, enabled, alias? }], launchAtLogin, paused, theme }`.
+- `<userData>/config.json` (D5): `{ version: 1, folders: [{ id, path, enabled, alias?, remote?, pausedUntil? }], launchAtLogin, paused, theme, macId, settingsFolder, repos, hiddenRepos }`.
+  - `repos` holds each repo's settings and `savedAt`, by key (D34). A config from before D34 loads with the defaults.
+- The settings folder (D35, D36): each computer writes only `settings-<macId>.json` there — its repos, where it keeps them, whether it syncs them, and their settings. The newest `savedAt` wins per repo. One watch on the folder, plus a read every 30 s for a missed event.
   - Written with temp file + rename.
   - A write the next load would reject is refused.
   - A file that will not parse is moved to `config.json.bak`, and the app starts from defaults.
-- Nothing is written into synced folders. Activity is read from git history only (D10).
+- Nothing is written into synced folders, except the user's own settings folder (D35). Activity is read from git history only (D10).
 - PR mode keeps one local ref, `refs/autosync/in-flight` (the batch in flight, D23). It lives in `.git`, is never pushed, and never touches the working tree.
 
 ## 6. Decisions
@@ -180,3 +199,26 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D31** — A tree that will not hold still for three tries is `pending`, not an `error`. The debounce tries again (30 s; 5 min in PR mode), and the one-hour notice (D7) covers a writer that never stops.
 - **D32** — A file some program rewrites on every pass is synced like any other. `.gitignore` stays the only filter (D9).
 - **D33** — The watcher skips what git ignores, as git itself reads it (every `.gitignore`, `.git/info/exclude`, the global excludes file), through one recursive OS watch per folder. No built-in list beyond `.git` and `node_modules`. What gets committed does not change (D9).
+- **D34** — Each repo has its own settings (push, pull, picked folders, a command before a push), keyed by its origin: `github.com/<owner>/<repo>` in lower case. The defaults behave as before.
+- **D35** — A settings folder that git syncs carries the settings between computers. Each computer writes only its own file; the newest change wins per repo. Changes D5.
+- **D36** — The file shape: `{ name, savedAt, repos: { <key>: { remoteUrl, path, syncing, savedAt, settings } } }`. A field a build cannot read keeps this computer's value.
+- **D37** — Push timing per repo: Auto (D3), 5 min to 4 h on a fixed timer from the first unsent change, or by hand.
+- **D38** — Auto never waits longer than 5 min after the first unsent change (PR mode: 30 min).
+- **D39** — Pull timing per repo: every 1 to 60 min, or by hand. Pulls run while changes wait. A wake pulls, and sends only in Auto.
+- **D40** — A quiet pass never pushes, in push mode too. It commits here, fetches and rebases.
+- **D41** — Before a push, AutoSync's own unpushed commits fold into one; a commit made by hand stops the fold. Not in PR mode.
+- **D42** — The quit flush skips a repo pushed by hand, and obeys the picks.
+- **D43** — The pending notice comes an hour after the push was due; never for a repo pushed by hand. Changes D7.
+- **D44** — Picked folders: only they are staged; the pull is still the whole repo. Changes D9.
+- **D45** — A file outside the picks changed here and on GitHub stops the pass before the rebase (`outside-changed`); AutoSync never undoes the other side.
+- **D46** — Changes outside the picks are listed, never pending; "Push these now…" sends them once.
+- **D47** — An edit outside the picks starts no push.
+- **D48** — A file with a `-wal` or `-journal` beside it is held back while it is there. Changes D32 for this case.
+- **D49** — A command before each send, in the repo root; a failure is `before-push`, and nothing is committed or pushed.
+- **D50** — Commit subjects name the folder the files share (two levels at most); the body lists every file.
+- **D51** — Pause one repo for 1 or 4 hours; it turns back on by itself. Local to the computer.
+- **D52** — The folder shows the next push and the next pull; Push now sends at once.
+- **D53** — "On your other computers": repos another computer syncs and this one lacks. Add finds the clone and starts it with the travelled settings; nothing turns on before a click.
+- **D54** — Clone… picks a parent folder and clones there; a folder already there stops it.
+- **D55** — No settings file inside the repos.
+- **D56** — Delivered through a PR with the required checks; no release of its own.
