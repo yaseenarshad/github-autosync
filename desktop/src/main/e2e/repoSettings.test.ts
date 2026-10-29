@@ -63,6 +63,8 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
     const { repo: aRepo, remote, cleanup } = await pushedRepo({ 'docs/start.md': 'start\n', 'app/main.ts': 'main\n' })
     cleanups.push(cleanup)
     const key = repoKey(remote.url)
+    // Made before the computers, so it is removed after they stop (cleanups run newest first; Windows will not remove a folder in use).
+    const parent = await dir('mac-b-github')
     const shared = await dir('settings')
     const a = await computer('Mac-A', shared)
     const b = await computer('Mac-B', shared)
@@ -79,7 +81,6 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
     expect(b.registry.get().repos[key]?.settings).toEqual(HOURLY_DOCS)
 
     // Clone…, then the folder is added: it runs with A's settings at once.
-    const parent = await dir('mac-b-github')
     mkdirSync(parent, { recursive: true })
     const cloned = await cloneInto(remote.url, parent, 'lab')
     if (!cloned.ok) throw new Error(cloned.error)

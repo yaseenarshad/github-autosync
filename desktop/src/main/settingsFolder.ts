@@ -85,6 +85,24 @@ const RETRY_MS = 5000
 /** The safety read for a missed event. */
 const REREAD_MS = 30_000
 
+/**
+ * On Windows a rename onto a file that another program is reading at that moment fails (EPERM,
+ * EACCES, EBUSY) — git, a sync tool, or the other computer's AutoSync on a shared drive. It is
+ * free a moment later, so the rename is tried again a few times before it counts as a failure.
+ */
+async function renameWithRetry(from: string, to: string, tries = 6): Promise<void> {
+  for (let left = tries; ; left -= 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (left <= 1 || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) throw err
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+}
+
 /** This computer's file: the pretty text, so the same config always gives the same text. */
 export function settingsFileText(config: Config, host: string): string {
   const repos: Record<string, MacRepo> = {}
@@ -183,7 +201,7 @@ export function followSettingsFolder(registry: Registry, deps: SettingsFolderDep
     const file = path.join(dir, own())
     const tmp = `${file}.tmp`
     await writeFile(tmp, text)
-    await rename(tmp, file)
+    await renameWithRetry(tmp, file)
     lastText = text
   }
 
