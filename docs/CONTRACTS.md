@@ -41,7 +41,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `outside` — changes outside the picked folders (D46). Never in `pending`; they start no push.
   - `repo` and `settings` — the folder's settings key and its repo's settings (D34).
   - `pullAt` — when the next pull runs (D52). `pausedUntil` — the end of a pause for a while (D51).
-- `AppStatus` also carries `settingsFolder`, `settingsFolderMissing` (D35) and `others`: the repos the other computers sync and this one does not (D53).
+- `AppStatus` also carries `settingsFolder`, `settingsFolderMissing`, `settingsFolderNote` (D35, D61), `others`: the repos the other computers sync and this one does not (D53, with `gone`, D61), `computers` and `defaults` (D60).
 - Worst state, used for the menu bar icon, the toolbar dot and sorting: attention > pending > syncing > synced > off (`byWorst`). Paused overrides everything in the menu bar.
 - Summary line (`headline`), the same in the window and the menu bar, first match wins:
   - `No folders yet`
@@ -155,7 +155,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 
 ## 5. Persistence
 
-- `<userData>/config.json` (D5): `{ version: 1, folders: [{ id, path, enabled, alias?, remote?, pausedUntil? }], launchAtLogin, paused, theme, macId, settingsFolder, repos, hiddenRepos }`.
+- `<userData>/config.json` (D5): `{ version: 1, folders: [{ id, path, enabled, alias?, remote?, pausedUntil? }], launchAtLogin, paused, theme, macId, settingsFolder, repos, hiddenRepos, defaults }`.
   - `repos` holds each repo's settings and `savedAt`, by key (D34). A config from before D34 loads with the defaults.
 - The settings folder (D35, D36): each computer writes only `settings-<macId>.json` there — its repos, where it keeps them, whether it syncs them, and their settings. The newest `savedAt` wins per repo. One watch on the folder, plus a read every 30 s for a missed event.
   - Written with temp file + rename.
@@ -222,3 +222,8 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D54** — Clone… picks a parent folder and clones there; a folder already there stops it.
 - **D55** — No settings file inside the repos.
 - **D56** — Delivered through a PR with the required checks; no release of its own.
+- **D57** — The checker's round 1 (YAZ-3720 to YAZ-3726): the offline retry repeats the pass that failed; a held-back open database changed on both sides stops the pass like a file outside the picks (D45); a field another build wrote keeps this computer's value; the safety read reports only real changes; "Push these now…" asked during a send goes with the follow-up; the quit only commits a repo with a before-push command (D42).
+- **D58** — The folder page from the demo: the state is one line beside the name; Sync settings and What's not syncing fold; the explanations sit behind ⓘ; the header shows only `owner/repo`, with the folder's place behind its own ⓘ (Copy path, Reveal, Terminal). Sync…, Download… and × ask first (changes D53's one click).
+- **D59** — Timers where the user looks: the sidebar row ("push in 42m"), the All folders page, and the menu bar ("Push at 3:05 PM", "Push all now").
+- **D60** — Settings → Computers lists the computers in the settings folder and when each last saved. Settings → New repos start with: the push and pull a repo runs with until someone changes its settings; kept on this computer (`config.json` `defaults`).
+- **D61** — Settings warns when the settings folder sits in a repo that pushes slower than Auto, is off, or is not synced here. A folder whose origin changes moves its settings to the new key. The folder picker asks `check-ignore` 200 folders at a time. A repo another computer lists that its remote says is gone shows "Gone from GitHub"; a synced folder whose repo is gone says so.

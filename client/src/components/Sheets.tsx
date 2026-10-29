@@ -159,7 +159,7 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
           </select>
         </div>
       </Setting>
-      <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
+      <Setting title="Notifications" detail="Only when a folder needs you, or changes are still not on GitHub an hour after their push was due. Never on success." />
     </Sheet>
   )
 }
