@@ -48,6 +48,8 @@ export interface MacFile {
   macId: string
   /** Its host name, for people; the rules never use it. */
   name: string
+  /** When it last saved (item 18); 0 when the file does not say. */
+  savedAt: number
   repos: Record<string, MacRepo>
 }
 
@@ -104,7 +106,7 @@ export function parseSettingsFile(macId: string, text: string): MacFile | null {
   } catch {
     return null
   }
-  const v = raw as { name?: unknown; repos?: unknown } | null
+  const v = raw as { name?: unknown; savedAt?: unknown; repos?: unknown } | null
   if (v === null || typeof v !== 'object' || v.repos === null || typeof v.repos !== 'object') return null
   const repos: Record<string, MacRepo> = {}
   for (const [key, entry] of Object.entries(v.repos as Record<string, unknown>)) {
@@ -112,7 +114,7 @@ export function parseSettingsFile(macId: string, text: string): MacFile | null {
     if (r === null || typeof r !== 'object' || typeof r.remoteUrl !== 'string' || typeof r.path !== 'string' || typeof r.savedAt !== 'number' || !Number.isFinite(r.savedAt)) continue
     repos[key] = { remoteUrl: r.remoteUrl, path: r.path, syncing: r.syncing === true, savedAt: r.savedAt, settings: readSettings(r.settings, DEFAULT_SETTINGS), raw: r.settings }
   }
-  return { macId, name: typeof v.name === 'string' ? v.name : '', repos }
+  return { macId, name: typeof v.name === 'string' ? v.name : '', savedAt: typeof v.savedAt === 'number' && Number.isFinite(v.savedAt) ? v.savedAt : 0, repos }
 }
 
 /**

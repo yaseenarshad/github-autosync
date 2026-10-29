@@ -1,4 +1,4 @@
-import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, RepoSettings, ThemeChoice } from './types'
+import type { ActivityPage, AppStatus, FolderVerdict, NavTarget, PullEvery, PushEvery, RepoSettings, ThemeChoice } from './types'
 
 /**
  * Everything the renderer can ask of the main process, exposed by the preload as `window.autosync`.
@@ -43,6 +43,8 @@ export interface AutoSyncApi {
   addOther(key: string): Promise<FolderVerdict>
   /** D54: picks a parent folder, clones the repo into it and adds it. Progress and failure show in `others`. */
   cloneOther(key: string): Promise<void>
+  /** Item 19: the push and pull a repo starts with until someone changes its settings. */
+  setDefaults(defaults: { push: PushEvery; pull: PullEvery }): Promise<AppStatus>
   /** D53: "Not on this Mac"; null shows every hidden repo again. */
   hideOther(key: string | null): Promise<AppStatus>
 

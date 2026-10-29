@@ -7,9 +7,9 @@ import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
 
 /** `<select>` values are strings: minutes as digits, the rest as their words. */
-const encode = (v: PushEvery | PullEvery): string => String(v)
-const decodePush = (v: string): PushEvery => (v === 'auto' || v === 'manual' ? v : Number(v))
-const decodePull = (v: string): PullEvery => (v === 'manual' ? v : Number(v))
+export const encode = (v: PushEvery | PullEvery): string => String(v)
+export const decodePush = (v: string): PushEvery => (v === 'auto' || v === 'manual' ? v : Number(v))
+export const decodePull = (v: string): PullEvery => (v === 'manual' ? v : Number(v))
 
 /** D34: one folder's repo settings, one line each; the explanations sit behind ⓘ. They apply on every computer once a settings folder is set (D35). */
 export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderStatus; status: AppStatus; onSheet: (sheet: SheetState) => void }) {

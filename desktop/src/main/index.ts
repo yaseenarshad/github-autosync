@@ -184,6 +184,14 @@ function status(): AppStatus {
     settingsFolderMissing: settingsFolder?.missing() ?? false,
     settingsFolderNote: settingsFolderNote(config),
     others: othersNow(),
+    computers:
+      config.settingsFolder === null
+        ? []
+        : [
+            { name: HOST, savedAt: Math.max(0, ...Object.values(config.repos).map((r) => r.savedAt)) || null, me: true },
+            ...(settingsFolder?.others() ?? []).map((f) => ({ name: f.name === '' ? f.macId : f.name, savedAt: f.savedAt || null, me: false })),
+          ],
+    defaults: config.defaults,
   }
 }
 

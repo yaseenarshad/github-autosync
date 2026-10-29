@@ -29,7 +29,11 @@ function stateLabel(f: FolderStatus, paused: boolean): string {
     case 'attention':
       return 'Needs you'
     case 'pending':
-      return f.offline ? 'Offline' : 'Waiting'
+      if (f.offline) return 'Offline'
+      // Item 17: a repo that pushes on a timer or by hand says when.
+      if (f.pr === null && f.settings.push === 'manual') return 'Push by hand'
+      if (f.pr === null && f.settings.push !== 'auto' && f.sendAt !== null) return `Push at ${clock(f.sendAt)}`
+      return 'Waiting'
     case 'syncing':
       return 'Syncing…'
     case 'synced':
@@ -56,7 +60,12 @@ export function trayTemplate(status: AppStatus, actions: TrayActions): MenuItemC
     ...header,
     { type: 'separator' },
     ...(rows.length > 0 ? [...rows, { type: 'separator' as const }] : []),
-    { label: 'Sync all now', enabled: !status.paused && status.folders.some((f) => f.enabled), click: () => actions.syncAll() },
+    {
+      // Item 17: when something waits for a timer or for the user, the same action reads as what it does first.
+      label: status.folders.some((f) => f.enabled && f.pending.length > 0 && f.settings.push !== 'auto') ? 'Push all now' : 'Sync all now',
+      enabled: !status.paused && status.folders.some((f) => f.enabled),
+      click: () => actions.syncAll(),
+    },
     // D15: the renderer confirms; the menu only opens the sheet.
     status.paused
       ? { label: 'Resume syncing…', click: () => actions.open({ folderId: null, sheet: 'resume' }) }

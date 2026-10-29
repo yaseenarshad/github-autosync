@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, FolderVerdict, OtherRepo, ThemeChoice } from '@shared/types'
-import { CHECKS_EVERY, pullLabel, pushLabel, SENDS_AFTER } from '@shared/status'
+import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel } from '@shared/status'
+import { decodePull, decodePush, encode } from './SyncSettings'
+import { Ago } from './Time'
 import { AddFolderSheet } from './AddFolderSheet'
 import { FolderPickerSheet } from './FolderPicker'
 import { platform } from '../lib/platform'
@@ -138,9 +140,48 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
           </button>
         </Setting>
       )}
-      <Setting title="When it syncs" detail={`By default: sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit. Each folder can change this.`} />
+      <ComputersRow status={status} />
+      <Setting title="New repos start with" detail="Until someone changes a repo's Sync settings. These stay on this computer.">
+        <div className="acts">
+          <select className="select" aria-label="Default push" value={encode(status.defaults.push)} onChange={(e) => window.autosync.setDefaults({ ...status.defaults, push: decodePush(e.target.value) })}>
+            {PUSH_CHOICES.map((p) => (
+              <option key={encode(p)} value={encode(p)}>
+                Push: {pushLabel(p)}
+              </option>
+            ))}
+          </select>
+          <select className="select" aria-label="Default pull" value={encode(status.defaults.pull)} onChange={(e) => window.autosync.setDefaults({ ...status.defaults, pull: decodePull(e.target.value) })}>
+            {PULL_CHOICES.map((p) => (
+              <option key={encode(p)} value={encode(p)}>
+                Pull: {pullLabel(p)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Setting>
       <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
     </Sheet>
+  )
+}
+
+/** Item 18: the computers sharing the settings folder, and when each last saved — proof they are connected. */
+function ComputersRow({ status }: { status: AppStatus }) {
+  if (status.computers.length === 0) return null
+  return (
+    <div className="set">
+      <div className="grow">
+        <div className="t">Computers</div>
+        <ul className="computers">
+          {status.computers.map((c) => (
+            <li key={`${c.name}-${c.me}`}>
+              <span className="mono">{c.name}</span>
+              {c.me && <span className="muted"> (this {platform.machine})</span>}
+              <span className="muted"> · {c.savedAt === null ? 'nothing saved yet' : <>saved <Ago at={c.savedAt} /></>}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   )
 }
 

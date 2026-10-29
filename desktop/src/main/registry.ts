@@ -36,6 +36,8 @@ export interface Config {
   repos: Record<string, StoredRepo>
   /** D53: other computers' repos the user said are not for this computer. */
   hiddenRepos: string[]
+  /** Item 19: what a repo starts with until someone changes its settings. */
+  defaults: { push: PushEvery; pull: PullEvery }
 }
 
 export interface Registry {
@@ -49,7 +51,7 @@ export const MAC_ID = /^[0-9a-z]{12}$/
 
 const newMacId = (): string => Array.from({ length: 12 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'.charAt(randomInt(36))).join('')
 
-const defaults = (): Config => ({ version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system', macId: newMacId(), settingsFolder: null, repos: {}, hiddenRepos: [] })
+const defaults = (): Config => ({ version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system', macId: newMacId(), settingsFolder: null, repos: {}, hiddenRepos: [], defaults: { push: DEFAULT_SETTINGS.push, pull: DEFAULT_SETTINGS.pull } })
 
 const THEMES: readonly unknown[] = ['system', 'light', 'dark'] satisfies ThemeChoice[]
 
@@ -120,6 +122,7 @@ function parse(raw: string): Config | null {
     if (!optional(v.settingsFolder, (f) => f === null || (typeof f === 'string' && path.isAbsolute(f)))) return null
     if (!optional(v.repos, (r) => r !== null && typeof r === 'object' && !Array.isArray(r) && Object.values(r).every(isStoredRepo))) return null
     if (!optional(v.hiddenRepos, (h) => Array.isArray(h) && h.every((k) => typeof k === 'string'))) return null
+    if (!optional(v.defaults, (d) => d !== null && typeof d === 'object' && isPush((d as { push?: unknown }).push) && isPull((d as { pull?: unknown }).pull))) return null
     return {
       version: 1,
       folders: v.folders.map(storedFolder),
@@ -131,6 +134,7 @@ function parse(raw: string): Config | null {
       settingsFolder: v.settingsFolder ?? null,
       repos: v.repos ?? {},
       hiddenRepos: v.hiddenRepos ?? [],
+      defaults: v.defaults ?? { push: DEFAULT_SETTINGS.push, pull: DEFAULT_SETTINGS.pull },
     }
   } catch {
     return null
@@ -175,10 +179,10 @@ export function withAlias(folder: FolderConfig, alias: string | null): FolderCon
 /** D34: a folder's key, once its origin is known. */
 export const keyOf = (folder: FolderConfig): string | null => (folder.remote === undefined ? null : repoKey(folder.remote))
 
-/** D34: the settings a folder runs with — its repo's, or the defaults. */
+/** D34: the settings a folder runs with — its repo's, or this computer's defaults (item 19). */
 export function settingsOf(config: Config, folder: FolderConfig): RepoSettings {
   const key = keyOf(folder)
-  return (key === null ? undefined : config.repos[key]?.settings) ?? DEFAULT_SETTINGS
+  return (key === null ? undefined : config.repos[key]?.settings) ?? { ...DEFAULT_SETTINGS, ...config.defaults }
 }
 
 /**

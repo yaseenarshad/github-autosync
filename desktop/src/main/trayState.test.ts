@@ -29,6 +29,20 @@ describe('trayTemplate', () => {
   const actions = () => ({ open: vi.fn<(t: NavTarget) => void>(), syncAll: vi.fn(), quit: vi.fn() })
   const labels = (items: MenuItemConstructorOptions[]) => items.map((i) => (i.type === 'separator' ? '---' : i.label))
 
+  it('says when a timer repo pushes, and offers Push all now while something waits (item 17)', () => {
+    const at = new Date(2026, 8, 27, 15, 5).getTime()
+    const hourly = { push: 60, pull: 5, paths: null, beforePush: null }
+    const status = makeStatus([
+      f('Lab', 'pending', { pending: [{ status: 'M', path: 'a.md' }], sendAt: at, settings: hourly }),
+      f('Notes', 'pending', { pending: [{ status: 'M', path: 'b.md' }], settings: { ...hourly, push: 'manual' } }),
+    ])
+    const items = labels(trayTemplate(status, actions()))
+    expect(items).toContain(`● Lab — Push at ${clock(at)}`)
+    expect(items).toContain('● Notes — Push by hand')
+    expect(items).toContain('Push all now')
+    expect(labels(trayTemplate(makeStatus([f('Lab', 'synced')]), actions()))).toContain('Sync all now')
+  })
+
   // The headline's wording is shared/status.ts (status.test.ts); this pins where it goes.
   it('heads with the worst news and the last sync, then folders attention-first', () => {
     const at = new Date(2026, 8, 27, 15, 5).getTime()

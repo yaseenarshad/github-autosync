@@ -6,7 +6,7 @@ import { platform } from '../lib/platform'
 import { headline } from '@shared/status'
 import { folderView } from '../lib/summary'
 import { Icon } from './Icon'
-import { Ago } from './Time'
+import { Ago, In } from './Time'
 
 interface Props {
   status: AppStatus
@@ -173,7 +173,13 @@ function FolderRow({
       <div className="min0">
         <div className="name">{f.name}</div>
         <div className="sub">
-          {v.kind === 'synced' && f.lastSyncedAt !== null ? (
+          {v.kind === 'pending' && !f.offline && f.pr === null && f.settings.push === 'manual' ? (
+            'push by hand'
+          ) : v.kind === 'pending' && !f.offline && f.pr === null && f.settings.push !== 'auto' && f.sendAt !== null ? (
+            <>
+              push <In at={f.sendAt} />
+            </>
+          ) : v.kind === 'synced' && f.lastSyncedAt !== null ? (
             <>
               Synced <Ago at={f.lastSyncedAt} />
             </>

@@ -34,8 +34,8 @@ describe('the other computers’ repos (D53)', () => {
 
   it('lists what another computer syncs and this one lacks, once per repo, with every computer that syncs it', async () => {
     const files: MacFile[] = [
-      { macId: 'a', name: 'Mac-Studio', repos: { 'github.com/me/lab': repo('https://github.com/me/lab.git', '/Users/sam/GitHub/lab'), 'github.com/me/off': repo('git@github.com:me/off.git', '/Users/sam/off', false) } },
-      { macId: 'b', name: 'MacBook-Air', repos: { 'github.com/me/lab': repo('https://github.com/me/lab.git', '/Users/sam/GitHub/lab'), 'github.com/me/notes': repo('git@github.com:me/notes.git', '/Users/sam/notes') } },
+      { macId: 'a', name: 'Mac-Studio', savedAt: 1, repos: { 'github.com/me/lab': repo('https://github.com/me/lab.git', '/Users/sam/GitHub/lab'), 'github.com/me/off': repo('git@github.com:me/off.git', '/Users/sam/off', false) } },
+      { macId: 'b', name: 'MacBook-Air', savedAt: 1, repos: { 'github.com/me/lab': repo('https://github.com/me/lab.git', '/Users/sam/GitHub/lab'), 'github.com/me/notes': repo('git@github.com:me/notes.git', '/Users/sam/notes') } },
     ]
     const cfg = await config([newFolder('/Users/yasin/notes', 'https://github.com/Me/Notes.git')], ['github.com/me/lab'])
     expect(othersFrom(cfg, files, '/Users/yasin')).toEqual([
@@ -52,7 +52,7 @@ describe('the other computers’ repos (D53)', () => {
       const synced = path.join(home, 'GitHub', 'synced')
       mkdirSync(synced, { recursive: true })
       const key = remote.url // a non-GitHub origin is its own key (D34)
-      const others = othersFrom(await config([]), [{ macId: 'a', name: 'Mac-Studio', repos: { [key]: repo(remote.url, '/Users/sam/elsewhere/lab') } }], home)
+      const others = othersFrom(await config([]), [{ macId: 'a', name: 'Mac-Studio', savedAt: 1, repos: { [key]: repo(remote.url, '/Users/sam/elsewhere/lab') } }], home)
 
       // Not at the swapped path, but beside a synced folder under another name.
       const clone = await makeGitRepo()
@@ -76,7 +76,7 @@ describe('a repo gone from its remote (item 35)', () => {
       const missing = path.join(await dir('nothing'), 'deleted.git')
       const others = othersFrom(
         await config([]),
-        [{ macId: 'a', name: 'Mac-Studio', repos: { live: repo(remote.url, '/Users/sam/live'), dead: repo(missing, '/Users/sam/dead') } }],
+        [{ macId: 'a', name: 'Mac-Studio', savedAt: 1, repos: { live: repo(remote.url, '/Users/sam/live'), dead: repo(missing, '/Users/sam/dead') } }],
         '/nowhere',
       )
       const found = await findClones(others, await config([]))

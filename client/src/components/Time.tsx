@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { ago, countdown, stamp } from '../lib/time'
+import { ago, countdown, inShort, stamp } from '../lib/time'
 
 // One shared ticker for every live time on screen, running only while something is subscribed.
 let now = Date.now()
@@ -36,6 +36,11 @@ export function Ago({ at }: { at: number }) {
 /** "5:51 PM (3m ago)" */
 export function Stamp({ at }: { at: number }) {
   return <>{stamp(at, useNow())}</>
+}
+
+/** "in 42m" until `at` */
+export function In({ at }: { at: number }) {
+  return <>{inShort(at, useNow())}</>
 }
 
 /** "0:23" until `at` */

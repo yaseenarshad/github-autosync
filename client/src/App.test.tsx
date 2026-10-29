@@ -40,6 +40,7 @@ function mockApi(status: AppStatus) {
     addOther: vi.fn(async (): Promise<FolderVerdict> => ({ ok: true, path: '/x', warning: null, offline: false })),
     cloneOther: vi.fn(async () => {}),
     hideOther: vi.fn(async () => status),
+    setDefaults: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -414,6 +415,29 @@ describe('sync settings (D34, D35)', () => {
     expect([...document.querySelectorAll('.others button')].map((b) => b.textContent)).not.toContain('Download…')
     await act(async () => navigate({ folderId: null, sheet: 'settings' }))
     expect(dialog()?.textContent).toContain('The settings travel only every 1 hour, with the push of os.')
+  })
+
+  it('shows when a timer repo pushes in the sidebar and the overview, and lists the computers and the defaults in Settings (items 15, 16, 18, 19)', async () => {
+    const hourly = { push: 60, pull: 5, paths: null, beforePush: null }
+    const api = await mount(
+      makeStatus([makeFolder({ id: 'notes', name: 'notes', state: 'pending', pending: [{ status: 'M', path: 'a.md' }], sendAt: Date.now() + 42 * 60_000 + 5_000, lastSyncedAt: Date.now(), settings: hourly })], {
+        settingsFolder: '/Users/yasin/os/Sync',
+        computers: [
+          { name: 'MacBook-Pro', savedAt: Date.now(), me: true },
+          { name: 'Mac-Studio', savedAt: null, me: false },
+        ],
+      }),
+    )
+    expect(document.querySelector('.sidebar')?.textContent).toContain('push in 43m')
+    expect(document.querySelector('.ov-row .ds')?.textContent).toContain('next push in 43m · 1 h push · 5 min pull · whole repo')
+    await act(async () => navigate({ folderId: null, sheet: 'settings' }))
+    expect(dialog()?.textContent).toContain('Mac-Studio · nothing saved yet')
+    const pull = document.querySelector<HTMLSelectElement>('select[aria-label="Default pull"]')!
+    await act(async () => {
+      pull.value = '15'
+      pull.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(api.setDefaults).toHaveBeenCalledWith({ push: 'auto', pull: 15 })
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {

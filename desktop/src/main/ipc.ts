@@ -148,6 +148,7 @@ export function registerIpc(deps: IpcDeps): void {
         deps.others.refresh()
       }
     },
+    setDefaults: async (defaults) => change((c) => ({ ...c, defaults })),
     hideOther: async (key) => change((c) => ({ ...c, hiddenRepos: key === null ? [] : [...new Set([...c.hiddenRepos, key])] })),
     pauseFolder: async (id, minutes) =>
       change((c) => ({

@@ -142,6 +142,10 @@ export interface AppStatus {
   settingsFolderNote: string | null
   /** D53: repos the other computers sync that this one does not have, hidden ones included. */
   others: OtherRepo[]
+  /** Item 18: the computers in the settings folder, this one first; empty with no settings folder. */
+  computers: Array<{ name: string; savedAt: number | null; me: boolean }>
+  /** Item 19: what a repo starts with until someone changes its settings; stays on this computer. */
+  defaults: { push: PushEvery; pull: PullEvery }
 }
 
 export type ThemeChoice = 'system' | 'light' | 'dark'

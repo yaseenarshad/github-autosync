@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from '@shared/status'
 import { createRegistry, MAC_ID, newFolder, settingsOf, withAlias, withLearnedRemotes, withRepoSettings } from './registry'
 
 /** What a fresh registry holds: a new random computer id, nothing else set. */
-const DEFAULTS = { version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system', macId: expect.stringMatching(MAC_ID), settingsFolder: null, repos: {}, hiddenRepos: [] }
+const DEFAULTS = { version: 1, folders: [], launchAtLogin: true, paused: false, theme: 'system', macId: expect.stringMatching(MAC_ID), settingsFolder: null, repos: {}, hiddenRepos: [], defaults: { push: 'auto', pull: 1 } }
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {

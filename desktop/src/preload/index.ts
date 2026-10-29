@@ -51,6 +51,7 @@ const api: AutoSyncApi = {
   addOther: (key) => ipcRenderer.invoke(channel('addOther'), key),
   cloneOther: (key) => ipcRenderer.invoke(channel('cloneOther'), key),
   hideOther: (key) => ipcRenderer.invoke(channel('hideOther'), key),
+  setDefaults: (defaults) => ipcRenderer.invoke(channel('setDefaults'), defaults),
   showInFinder: (id) => ipcRenderer.invoke(channel('showInFinder'), id),
   openExternal: (url) => ipcRenderer.invoke(channel('openExternal'), url),
   copyText: (text) => ipcRenderer.invoke(channel('copyText'), text),
