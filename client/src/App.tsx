@@ -53,7 +53,7 @@ export function App() {
       {titlebar}
       <Toolbar status={status} folder={folder} onOverview={() => setSelected(null)} onSheet={setSheet} />
       <div className="body">
-        <Sidebar status={status} selected={folder?.id ?? null} home={home} onSelect={setSelected} onAdd={openAdd} />
+        <Sidebar status={status} selected={folder?.id ?? null} home={home} onSelect={setSelected} onAdd={openAdd} onAddFailed={(verdict) => setSheet({ kind: 'add', verdict })} />
         <main className="main">
           {status.folders.length === 0 ? (
             <FirstRun onAdd={openAdd} />

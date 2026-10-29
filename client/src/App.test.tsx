@@ -37,6 +37,9 @@ function mockApi(status: AppStatus) {
     listFolders: vi.fn(async (_id: string, rel: string): Promise<string[]> => (rel === '' ? ['docs', 'app'] : [])),
     pushOutside: vi.fn(async () => {}),
     pauseFolder: vi.fn(async () => status),
+    addOther: vi.fn(async (): Promise<FolderVerdict> => ({ ok: true, path: '/x', warning: null, offline: false })),
+    cloneOther: vi.fn(async () => {}),
+    hideOther: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -346,6 +349,30 @@ describe('sync settings (D34, D35)', () => {
     expect(document.querySelector('.status .h')?.textContent).toMatch(/^Paused until /)
     await click(button('Resume now'))
     expect(paused.pauseFolder).toHaveBeenCalledWith('notes', null)
+  })
+
+  it('lists the other computers’ repos: Add, Clone…, and Not on this computer (D53, D54)', async () => {
+    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false }
+    const others = [
+      { ...other, key: 'github.com/me/lab', expectedPath: '/Users/yasin/GitHub/lab', found: '/Users/yasin/GitHub/lab' },
+      { ...other, key: 'github.com/me/new', name: 'new', expectedPath: '/Users/yasin/GitHub/new', found: null },
+      { ...other, key: 'github.com/me/old', name: 'old', expectedPath: '/Users/yasin/GitHub/old', found: null, hidden: true },
+    ]
+    const api = await mount(makeStatus([], { others }))
+    expect(document.querySelector('.others')?.textContent).toContain('On your other computers')
+    expect(document.querySelector('.others')?.textContent).not.toContain('old')
+
+    api.addOther.mockResolvedValueOnce({ ok: false, path: '/Users/yasin/GitHub/lab', reason: 'auth' })
+    const inOthers = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('.others button')].find((b) => b.textContent === text)!
+    await click(inOthers('Add'))
+    expect(api.addOther).toHaveBeenCalledWith('github.com/me/lab')
+    expect(dialog()).not.toBeNull() // the Add sheet shows why
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    await click(inOthers('Clone…'))
+    expect(api.cloneOther).toHaveBeenCalledWith('github.com/me/new')
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Not on this computer: new"]')!)
+    expect(api.hideOther).toHaveBeenCalledWith('github.com/me/new')
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {

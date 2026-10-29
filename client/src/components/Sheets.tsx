@@ -128,6 +128,13 @@ function SettingsSheet({ status, onClose }: { status: AppStatus; onClose: () => 
         <span className="mono">{status.hostname}</span>
       </Setting>
       <SettingsFolderRow status={status} />
+      {status.others.some((o) => o.hidden) && (
+        <Setting title="Hidden repos" detail={`${status.others.filter((o) => o.hidden).map((o) => o.name).join(', ')}: synced on your other computers, hidden here.`}>
+          <button className="btn" onClick={() => window.autosync.hideOther(null)}>
+            Show hidden repos
+          </button>
+        </Setting>
+      )}
       <Setting title="When it syncs" detail={`By default: sends ${SENDS_AFTER} · checks GitHub ${CHECKS_EVERY} · on wake · when you quit. Each folder can change this.`} />
       <Setting title="Notifications" detail="Only when a folder needs you, or changes haven't sent for an hour. Never on success." />
     </Sheet>

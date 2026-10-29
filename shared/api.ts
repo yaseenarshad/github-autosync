@@ -39,6 +39,12 @@ export interface AutoSyncApi {
   pushOutside(id: string): Promise<void>
   /** D51: off for `minutes`, then on again by itself; null resumes now. */
   pauseFolder(id: string, minutes: number | null): Promise<AppStatus>
+  /** D53: adds the clone found for another computer's repo, with its settings. Answers the Add folder checks (D12): not ok → nothing was added. */
+  addOther(key: string): Promise<FolderVerdict>
+  /** D54: picks a parent folder, clones the repo into it and adds it. Progress and failure show in `others`. */
+  cloneOther(key: string): Promise<void>
+  /** D53: "Not on this Mac"; null shows every hidden repo again. */
+  hideOther(key: string | null): Promise<AppStatus>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */

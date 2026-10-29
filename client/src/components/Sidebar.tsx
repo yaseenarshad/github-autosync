@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppStatus, FolderStatus } from '@shared/types'
+import type { AppStatus, FolderStatus, FolderVerdict, OtherRepo } from '@shared/types'
 import { parentDir, tildify } from '../lib/format'
 import { headline } from '@shared/status'
 import { folderView } from '../lib/summary'
@@ -12,9 +12,11 @@ interface Props {
   home: string | null
   onSelect: (id: string | null) => void
   onAdd: () => void
+  /** D53: a one-click Add whose checks failed shows the Add sheet with the reason. */
+  onAddFailed: (verdict: FolderVerdict) => void
 }
 
-export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
+export function Sidebar({ status, selected, home, onSelect, onAdd, onAddFailed }: Props) {
   const [filter, setFilter] = useState('')
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
   const q = filter.trim().toLowerCase()
@@ -80,6 +82,7 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
             {q && groups.size === 0 && <div className="list-note">No folders match “{filter.trim()}”.</div>}
           </>
         )}
+        <OtherComputers others={status.others.filter((o) => !o.hidden)} home={home} onAddFailed={onAddFailed} />
       </div>
       <div className="side-foot">
         <button className="btn-quiet" onClick={onAdd}>
@@ -88,6 +91,51 @@ export function Sidebar({ status, selected, home, onSelect, onAdd }: Props) {
         </button>
       </div>
     </aside>
+  )
+}
+
+/** D53, D54: repos the other computers sync and this one does not. Nothing turns on before a click. */
+function OtherComputers({ others, home, onAddFailed }: { others: OtherRepo[]; home: string | null; onAddFailed: (verdict: FolderVerdict) => void }) {
+  const [closed, setClosed] = useState(false)
+  if (others.length === 0) return null
+  const api = window.autosync
+  async function add(key: string) {
+    const verdict = await api.addOther(key)
+    if (!verdict.ok) onAddFailed(verdict)
+  }
+  return (
+    <div className="others">
+      <button className={`plain group ${closed ? 'closed' : ''}`} onClick={() => setClosed(!closed)}>
+        <Icon name="chev" className="ico chev" />
+        <span>On your other computers</span>
+        <span className="gc">{others.length}</span>
+      </button>
+      {!closed &&
+        others.map((o) => (
+          <div className="other" key={o.key}>
+            <div className="min0">
+              <div className="name">{o.name}</div>
+              <div className="sub" title={o.error ?? undefined}>
+                {o.cloning ? 'Cloning…' : o.error !== null ? o.error : o.found !== null ? tildify(o.found, home) : `Not here yet · on ${o.computers.join(', ')}`}
+              </div>
+            </div>
+            <div className="acts">
+              {o.found !== null ? (
+                <button className="btn" onClick={() => add(o.key)}>
+                  Add
+                </button>
+              ) : (
+                <button className="btn" disabled={o.cloning} onClick={() => api.cloneOther(o.key)}>
+                  Clone…
+                </button>
+              )}
+              <button className="x" aria-label={`Not on this computer: ${o.name}`} title="Not on this computer" onClick={() => api.hideOther(o.key)}>
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+    </div>
   )
 }
 

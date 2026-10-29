@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, nativeTheme, Notification, powerMonitor, type MenuItemConstructorOptions } from 'electron'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AppStatus, NavTarget } from '@shared/types'
+import type { AppStatus, NavTarget, OtherRepo } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
 import { findGit } from './git/exec'
 import { createSyncManager, type FolderConfig } from './git/manager'
@@ -10,6 +11,7 @@ import { registerIpc, throttle } from './ipc'
 import { createNoticeRules, type Notice } from './notify'
 import { createRegistry, settingsOf } from './registry'
 import { followSettingsFolder, type SettingsFolder } from './settingsFolder'
+import { findClones, othersFrom } from './others'
 import { createTray } from './tray'
 import { watchFolder } from './watch'
 
@@ -48,6 +50,40 @@ const manager = createSyncManager({
 
 /** D35: started with the app (a second instance must never touch it); see `whenReady`. */
 let settingsFolder: SettingsFolder | undefined
+
+/** D53: where each other computer's repo is on this one, by key; refreshed by `findOthers`. */
+let clones = new Map<string, string | null>()
+/** D54: clones running or failed, by key. */
+const cloneState = new Map<string, { cloning: boolean; error: string | null }>()
+let finding = false
+let findAgain = false
+
+/** The other computers' repos as the window shows them: always from the latest files and config. */
+function othersNow(): OtherRepo[] {
+  return othersFrom(registry.get(), settingsFolder?.others() ?? [], homedir()).map((o) => ({ ...o, found: clones.get(o.key) ?? null, ...cloneState.get(o.key) }))
+}
+
+/** D53: look for clones on this computer; one run at a time, and one more if asked during it. */
+function findOthers(): void {
+  if (finding) {
+    findAgain = true
+    return
+  }
+  finding = true
+  void findClones(othersNow(), registry.get())
+    .then((found) => {
+      clones = new Map(found.map((o) => [o.key, o.found]))
+    })
+    .catch((err: unknown) => console.warn(`[others] ${String(err)}`))
+    .finally(() => {
+      finding = false
+      refresh()
+      if (findAgain) {
+        findAgain = false
+        findOthers()
+      }
+    })
+}
 
 /** The manager runs each folder with its repo's settings (D34). */
 function runFolders(): void {
@@ -99,6 +135,7 @@ function createWindow(): BrowserWindow {
 function showWindow(): BrowserWindow {
   // Installing git is the one fix made outside the app; opening the window is when it gets noticed.
   void probeGit()
+  findOthers()
   void app.dock?.show()
   if (win === null) {
     win = createWindow()
@@ -129,6 +166,7 @@ function status(): AppStatus {
     theme: config.theme,
     settingsFolder: config.settingsFolder,
     settingsFolderMissing: settingsFolder?.missing() ?? false,
+    others: othersNow(),
   }
 }
 
@@ -204,7 +242,21 @@ app.on('second-instance', () => {
 
 void app.whenReady().then(() => {
   if (!primary) return
-  registerIpc({ registry, manager, status, apply, navigate })
+  registerIpc({
+    registry,
+    manager,
+    status,
+    apply,
+    navigate,
+    others: {
+      find: (key) => othersNow().find((o) => o.key === key),
+      mark: (key, state) => {
+        cloneState.set(key, state)
+        refresh()
+      },
+      refresh: findOthers,
+    },
+  })
   Menu.setApplicationMenu(appMenu())
   tray = createTray(join(app.getAppPath(), 'resources', 'tray'), {
     open: navigate,
@@ -221,6 +273,7 @@ void app.whenReady().then(() => {
     host: HOST,
     onChange: () => {
       runFolders()
+      findOthers()
       refresh()
     },
   })

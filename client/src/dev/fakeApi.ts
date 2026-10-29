@@ -95,8 +95,12 @@ export function createFakeApi(): AutoSyncApi {
     gitMissing: false,
     launchAtLogin: true,
     theme: 'system',
-    settingsFolder: null,
+    settingsFolder: `${HOME}/Documents/GitHub/yaseen-os/Sync/github-autosync-settings`,
     settingsFolderMissing: false,
+    others: [
+      { key: 'github.com/yaseenarshad/lab', name: 'lab', remoteUrl: 'https://github.com/yaseenarshad/lab.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/lab`, found: `${HOME}/Documents/GitHub/lab`, cloning: false, error: null, hidden: false },
+      { key: 'github.com/yaseenarshad/video-notes', name: 'video-notes', remoteUrl: 'https://github.com/yaseenarshad/video-notes.git', computers: [OTHER], expectedPath: `${HOME}/Documents/GitHub/video-notes`, found: null, cloning: false, error: null, hidden: false },
+    ],
     folders: [
       folder('team-skills', 'Documents/GitHub', {
         state: 'attention',
@@ -244,6 +248,17 @@ export function createFakeApi(): AutoSyncApi {
     setSettingsFolder: (settingsFolder) => set({ ...status, settingsFolder }),
     listFolders: async (_id, rel) => (rel === '' ? ['docs', 'evals', 'app'] : rel.split('/').length < 3 ? [`${rel}/notes`, `${rel}/drafts`] : []),
     pauseFolder: (id, minutes) => patch(id, { pausedUntil: minutes === null ? null : Date.now() + minutes * MIN, state: minutes === null ? 'synced' : 'off' }),
+    addOther: async (key) => {
+      const other = status.others.find((o) => o.key === key)!
+      await set({ ...status, others: status.others.filter((o) => o.key !== key), folders: [...status.folders, folder(other.name, 'Documents/GitHub', { lastSyncedAt: Date.now() })] })
+      return { ok: true, path: other.found ?? other.expectedPath, warning: null, offline: false }
+    },
+    async cloneOther(key) {
+      const mark = (over: Partial<AppStatus['others'][number]>) => set({ ...status, others: status.others.map((o) => (o.key === key ? { ...o, ...over } : o)) })
+      await mark({ cloning: true, error: null })
+      setTimeout(() => void mark({ cloning: false, found: status.others.find((o) => o.key === key)?.expectedPath ?? null }), 1500)
+    },
+    hideOther: (key) => set({ ...status, others: status.others.map((o) => ({ ...o, hidden: key === null ? false : o.hidden || o.key === key })) }),
     pushOutside: (id) => patch(id, { outside: [] }).then(() => undefined),
     showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
     // Fake ids are the folder names.

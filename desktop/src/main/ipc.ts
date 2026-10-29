@@ -1,15 +1,18 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import path from 'node:path'
 import { clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import type { AutoSyncApi } from '@shared/api'
 import { isGitHubUrl, MINUTE_MS } from '@shared/status'
-import type { AppStatus, NavTarget } from '@shared/types'
+import type { AppStatus, NavTarget, OtherRepo } from '@shared/types'
 import { channel, type Invokable } from '../channels'
 import { folderMenuTemplate } from './folderMenu'
 import { checkFolder, listSubfolders } from './git/detect'
 import { findGit } from './git/exec'
 import { readActivity } from './git/activity'
 import type { SyncManager } from './git/manager'
+import { cloneInto } from './others'
 import { isRepoPath, newFolder, withAlias, withRepoSettings, type Config, type Registry } from './registry'
 
 /**
@@ -17,9 +20,19 @@ import { isRepoPath, newFolder, withAlias, withRepoSettings, type Config, type R
  * config to the sync manager (which starts or stops folders) and answer the fresh status.
  */
 
+/** D53, D54: the other computers' repos, as `index.ts` keeps them. */
+export interface OthersDeps {
+  find(key: string): OtherRepo | undefined
+  /** A clone started, ended or failed. */
+  mark(key: string, state: { cloning: boolean; error: string | null }): void
+  /** Look for clones again (a folder was added). */
+  refresh(): void
+}
+
 export interface IpcDeps {
   registry: Registry
   manager: SyncManager
+  others: OthersDeps
   status(): AppStatus
   /** Pushes the registry's config to the manager and the OS (login item). */
   apply(): void
@@ -104,6 +117,38 @@ export function registerIpc(deps: IpcDeps): void {
       return listSubfolders(bin, folderPath(id), rel)
     },
     pushOutside: (id) => manager.pushOutside(id),
+    addOther: async (key) => {
+      const other = deps.others.find(key)
+      if (other?.found == null) throw new Error(`No clone of ${key} on this computer`)
+      const at = other.found
+      // D53: the same checks as Add folder (D12); a failed one adds nothing and the window shows why.
+      const verdict = await checkFolder(at, registry.get().folders.map((f) => f.path))
+      if (verdict.ok) {
+        change((c) => ({ ...c, folders: [...c.folders, newFolder(at, other.remoteUrl)] }))
+        deps.others.refresh()
+      }
+      return verdict
+    },
+    cloneOther: async (key) => {
+      const other = deps.others.find(key)
+      if (other === undefined) throw new Error(`No repo ${key} on the other computers`)
+      const near = path.dirname(other.expectedPath)
+      const picked = await dialog.showOpenDialog({
+        properties: ['openDirectory', 'createDirectory'],
+        ...(existsSync(near) ? { defaultPath: near } : {}),
+        message: `Choose the folder to put ${other.name} in`,
+      })
+      const parent = picked.canceled ? null : (picked.filePaths[0] ?? null)
+      if (parent === null) return
+      deps.others.mark(key, { cloning: true, error: null })
+      const cloned = await cloneInto(other.remoteUrl, parent, other.name)
+      deps.others.mark(key, { cloning: false, error: cloned.ok ? null : cloned.error })
+      if (cloned.ok) {
+        change((c) => ({ ...c, folders: [...c.folders, newFolder(cloned.path, other.remoteUrl)] }))
+        deps.others.refresh()
+      }
+    },
+    hideOther: async (key) => change((c) => ({ ...c, hiddenRepos: key === null ? [] : [...new Set([...c.hiddenRepos, key])] })),
     pauseFolder: async (id, minutes) =>
       change((c) => ({
         ...c,

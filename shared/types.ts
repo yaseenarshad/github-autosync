@@ -138,9 +138,31 @@ export interface AppStatus {
   settingsFolder: string | null
   /** The chosen settings folder cannot be read or written right now; this computer keeps its own copy. */
   settingsFolderMissing: boolean
+  /** D53: repos the other computers sync that this one does not have, hidden ones included. */
+  others: OtherRepo[]
 }
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
+
+/** D53: a repo another computer syncs and this one does not have. */
+export interface OtherRepo {
+  /** D34: its settings key. */
+  key: string
+  name: string
+  remoteUrl: string
+  /** The host names of the computers that sync it. */
+  computers: string[]
+  /** The other computer's path with this computer's home folder: where a clone most likely is. */
+  expectedPath: string
+  /** Where a clone of it is on this computer; null when none was found (D54: Clone…). */
+  found: string | null
+  /** D54: a clone is running. */
+  cloning: boolean
+  /** The last clone's failure in words; null when none. */
+  error: string | null
+  /** "Not on this Mac": hidden until Settings → Show hidden repos. */
+  hidden: boolean
+}
 
 /** D10: the Activity log is read from git history only. */
 export type ActivityKind = 'sent' | 'received' | 'conflict' | 'manual'
