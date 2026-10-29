@@ -355,7 +355,7 @@ describe('sync settings (D34, D35)', () => {
     expect(paused.pauseFolder).toHaveBeenCalledWith('notes', null)
   })
 
-  it('lists the other computers’ repos: Add, Clone…, and Not on this computer (D53, D54)', async () => {
+  it('lists the other computers’ repos: Sync…, Download…, and Not on this computer (D53, D54)', async () => {
     const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } }
     const others = [
       { ...other, key: 'github.com/me/lab', expectedPath: '/Users/yasin/GitHub/lab', found: '/Users/yasin/GitHub/lab' },
@@ -369,7 +369,7 @@ describe('sync settings (D34, D35)', () => {
     api.addOther.mockResolvedValueOnce({ ok: false, path: '/Users/yasin/GitHub/lab', reason: 'auth' })
     const inOthers = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('.others button')].find((b) => b.textContent === text)!
     // Each one explains and asks first (D15): nothing happens before the confirm.
-    await click(inOthers('Add…'))
+    await click(inOthers('Sync…'))
     expect(api.addOther).not.toHaveBeenCalled()
     expect(dialog()?.textContent).toContain('Push: Every 1 hour')
     await click(button('Start syncing'))
@@ -377,9 +377,9 @@ describe('sync settings (D34, D35)', () => {
     expect(dialog()?.textContent).toContain('Add') // the Add sheet shows why it failed
 
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
-    await click(inOthers('Clone…'))
+    await click(inOthers('Download…'))
     expect(api.cloneOther).not.toHaveBeenCalled()
-    await click(button('Choose a folder…'))
+    await click(button('Choose where…'))
     expect(api.cloneOther).toHaveBeenCalledWith('github.com/me/new')
 
     await click(document.querySelector<HTMLButtonElement>('button[aria-label="Not on this computer: new"]')!)
@@ -392,7 +392,7 @@ describe('sync settings (D34, D35)', () => {
     await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', ignored: { patterns: ['.venv/'], count: 12 }, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } })]))
     await click(button('notes'))
     const sums = [...document.querySelectorAll('.fold-sum')].map((e) => e.textContent)
-    expect(sums).toEqual(['12 files ignored by your .gitignore', 'Push every 1 hour · pull every 5 min · docs'])
+    expect(sums).toEqual(['12 files ignored by your .gitignore', '1 h push · 5 min pull · docs'])
     expect(document.querySelector('select[aria-label="Push"]')).toBeNull()
   })
 

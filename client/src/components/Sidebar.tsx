@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AppStatus, FolderStatus, OtherRepo } from '@shared/types'
 import type { SheetState } from './Sheets'
 import { parentDir, tildify } from '../lib/format'
+import { platform } from '../lib/platform'
 import { headline } from '@shared/status'
 import { folderView } from '../lib/summary'
 import { Icon } from './Icon'
@@ -114,17 +115,17 @@ function OtherComputers({ others, home, onSheet }: { others: OtherRepo[]; home: 
             <div className="min0">
               <div className="name">{o.name}</div>
               <div className="sub" title={o.error ?? o.found ?? `On ${o.computers.join(', ')}`}>
-                {o.cloning ? 'Cloning…' : o.error !== null ? o.error : o.found !== null ? `Found here · ${tildify(o.found, home)}` : 'Not on this computer yet'}
+                {o.cloning ? 'Downloading…' : o.error !== null ? o.error : o.found !== null ? `Already on this ${platform.machine}` : `Not on this ${platform.machine} yet`}
               </div>
             </div>
             <div className="acts">
               {o.found !== null ? (
                 <button className="btn" onClick={() => onSheet({ kind: 'add-other', key: o.key })}>
-                  Add…
+                  Sync…
                 </button>
               ) : (
                 <button className="btn" disabled={o.cloning} onClick={() => onSheet({ kind: 'clone-other', key: o.key })}>
-                  Clone…
+                  Download…
                 </button>
               )}
               <button className="x" aria-label={`Not on this computer: ${o.name}`} title="Not on this computer" onClick={() => onSheet({ kind: 'hide-other', key: o.key })}>

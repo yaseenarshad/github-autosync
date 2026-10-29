@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AppStatus, FolderStatus, PullEvery, PushEvery, RepoSettings } from '@shared/types'
-import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel } from '@shared/status'
+import { PULL_CHOICES, pullLabel, PUSH_CHOICES, pushLabel, settingsSummary } from '@shared/status'
 import { Fold } from './Fold'
 import { platform } from '../lib/platform'
 import { Icon } from './Icon'
@@ -21,7 +21,7 @@ export function SyncSettings({ folder: f, status, onSheet }: { folder: FolderSta
       ? `Saved on ${platform.here} only. Choose a settings folder in Settings to use them on every computer.`
       : 'The same on every computer that syncs this repo.'
 
-  const summary = `Push ${pushLabel(f.settings.push).toLowerCase()} · pull ${pullLabel(f.settings.pull).toLowerCase()} · ${f.settings.paths === null ? 'whole repo' : f.settings.paths.join(', ')}${f.settings.beforePush === null ? '' : ` · ${f.settings.beforePush}`}`
+  const summary = settingsSummary(f.settings)
   return (
     <Fold
       auto={false}

@@ -33,8 +33,8 @@ export function FolderPage({ folder: f, status, onSheet }: Props) {
           <div className="title-row">
             <h1>{f.name}</h1>
             {/* The folder's state, as one quiet line beside its name: no card unless something needs the user. */}
-            {/* Fine is a few words, with the detail on hover; anything to act on keeps its line. */}
-            <div className={`status ${v.cls} ${v.kind === 'synced' ? 'quiet' : ''}`}>
+            {/* A few words: when it last synced, and what happens next (the next push or the next check). */}
+            <div className={`status ${v.cls}`}>
               <span className="big">
                 <Icon name={v.icon} />
               </span>
@@ -223,10 +223,12 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
         </>
       )
     case 'synced':
-      return (
+      return f.pullAt !== null ? (
         <>
-          <LastSynced at={f.lastSyncedAt} /> · checks GitHub {checksEvery(f.settings.pull)}
+          next check in <Countdown at={f.pullAt} />
         </>
+      ) : (
+        <>checks GitHub {checksEvery(f.settings.pull)}</>
       )
   }
 }

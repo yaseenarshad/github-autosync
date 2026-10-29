@@ -345,7 +345,7 @@ function OtherSheet({ kind, other: o, onClose, onAddFailed }: { kind: 'add-other
       )
     case 'clone-other':
       return (
-        <ConfirmSheet title={`Download “${o.name}” to ${platform.here}?`} confirm="Choose a folder…" onConfirm={() => api.cloneOther(o.key)} onClose={onClose}>
+        <ConfirmSheet title={`Download “${o.name}” to ${platform.here}?`} confirm="Choose where…" onConfirm={() => api.cloneOther(o.key)} onClose={onClose}>
           <p className="first">
             {from} syncs this repo, and {platform.here} has no copy yet. AutoSync downloads it from <span className="mono">{o.remoteUrl}</span> into a folder you
             pick, then syncs it with these settings:

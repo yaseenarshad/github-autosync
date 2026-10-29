@@ -49,6 +49,17 @@ export const PULL_CHOICES: readonly PullEvery[] = [1, 5, 15, 60, 'manual']
 export const minutesLabel = (m: number): string => (m % 60 === 0 ? plural(m / 60, 'hour') : `${m} min`)
 
 export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after edits)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
+/** `1 h`, `5 min` — the short form for one-line summaries. */
+const short = (m: number): string => (m % 60 === 0 ? `${m / 60} h` : `${m} min`)
+
+/** One folded line for a repo's settings: `1 h push · 5 min pull · 2 folders · before-push command`. */
+export function settingsSummary(s: RepoSettings): string {
+  const push = s.push === 'auto' ? 'auto push' : s.push === 'manual' ? 'push by hand' : `${short(s.push)} push`
+  const pull = s.pull === 'manual' ? 'pull by hand' : `${short(s.pull)} pull`
+  const folders = s.paths === null ? 'whole repo' : s.paths.length === 1 ? (s.paths[0] ?? '') : `${s.paths.length} folders`
+  return [push, pull, folders, ...(s.beforePush === null ? [] : ['before-push command'])].join(' · ')
+}
+
 /** D52: the pull in a sentence — "checks GitHub every minute". */
 export const checksEvery = (p: PullEvery): string => (p === 'manual' ? 'only when you press Sync now' : p === 1 ? 'every minute' : `every ${minutesLabel(p)}`)
 
