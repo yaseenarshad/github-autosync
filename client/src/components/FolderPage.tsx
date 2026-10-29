@@ -30,16 +30,18 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
       <div className="head">
         <div className="grow">
           <h1>{f.name}</h1>
-          <div className="path">{tildify(f.path, home)}</div>
+          <div className="path" title={f.path}>
+            {tildify(f.path, home)}
+          </div>
           <div className="pills">
             <span className="pill">
               <Icon name="branch" />
               {f.branch ?? 'No branch'} ⇄ origin
             </span>
             {(f.webUrl || f.remoteUrl) && (
-              <span className="pill">
+              <span className="pill" title={f.remoteUrl ?? undefined}>
                 <Icon name="ext" />
-                {f.webUrl ? webLabel(f.webUrl) : f.remoteUrl}
+                <span className="one">{f.webUrl ? webLabel(f.webUrl) : f.remoteUrl}</span>
               </span>
             )}
             {f.publishVia === 'pr' && (

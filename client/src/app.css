@@ -406,7 +406,24 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-
 .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(33, 136, 255, .25); }
 .select:disabled { opacity: .55; }
 .set .acts, .action .acts { display: flex; gap: 6px; flex: none; }
-.action .acts .text-input { width: 240px; }
+.kv { border: 1px solid var(--soft-border); border-radius: 8px; padding: 2px 14px; }
+.kv-row { display: flex; gap: 28px; padding: 8px 0; border-top: 1px solid var(--soft-border); }
+.kv-row:first-child { border-top: 0; }
+.kv-row.two > .kv-field { flex: 1; }
+.kv-row.two > .kv-field + .kv-field .kv-label { width: auto; }
+.kv-field { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.kv-label { width: 92px; flex: none; font-weight: 600; font-size: 12.5px; display: inline-flex; align-items: center; gap: 4px; }
+.kv-field .select { min-width: 0; flex: 1; max-width: 230px; }
+.kv-field .acts.grow { flex: 1; display: flex; gap: 6px; }
+.kv-field .text-input { flex: 1; height: 28px; }
+.info { display: inline-flex; color: var(--muted); cursor: help; vertical-align: -2px; }
+.info .ico { width: 13px; height: 13px; }
+.section h2 .info { margin-left: 2px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip { font-size: 11.5px; padding: 2px 8px; border-radius: 10px; background: var(--box); border: 1px solid var(--soft-border); }
+.head .path, .head .pill .one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill .one { max-width: 360px; }
+.group .gp { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .d.warn { color: var(--warn); }
 .radio { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
 .tree { border: 1px solid var(--soft-border); border-radius: 8px; padding: 6px 8px; margin: 8px 0; max-height: 280px; overflow: auto; }

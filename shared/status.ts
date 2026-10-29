@@ -48,7 +48,7 @@ export const PULL_CHOICES: readonly PullEvery[] = [1, 5, 15, 60, 'manual']
 /** `5 min`, `1 hour`, `4 hours`. */
 export const minutesLabel = (m: number): string => (m % 60 === 0 ? plural(m / 60, 'hour') : `${m} min`)
 
-export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after you stop editing)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
+export const pushLabel = (p: PushEvery): string => (p === 'auto' ? `Auto (${DEBOUNCE_MS / 1000}s after edits)` : p === 'manual' ? 'By hand only' : `Every ${minutesLabel(p)}`)
 /** D52: the pull in a sentence — "checks GitHub every minute". */
 export const checksEvery = (p: PullEvery): string => (p === 'manual' ? 'only when you press Sync now' : p === 1 ? 'every minute' : `every ${minutesLabel(p)}`)
 

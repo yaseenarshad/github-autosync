@@ -22,6 +22,7 @@ export type IconName =
   | 'trash'
   | 'computer'
   | 'logo-octopus'
+  | 'info'
 
 export function Icon({ name, className = 'ico', style }: { name: IconName; className?: string; style?: CSSProperties }) {
   return (
@@ -41,6 +42,11 @@ export function IconSprite() {
           <path d="M2.4 9.8A5.8 5.8 0 0 0 13 11.4" />
           <path d="M3 1.8v2.8h2.8" />
           <path d="M13 14.2v-2.8h-2.8" />
+        </symbol>
+        <symbol id="i-info" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="6.2" />
+          <path d="M8 7.2v4" />
+          <path d="M8 4.8v.1" />
         </symbol>
         <symbol id="i-check" viewBox="0 0 16 16">
           <path d="M3 8.5l3.2 3L13 4.5" />

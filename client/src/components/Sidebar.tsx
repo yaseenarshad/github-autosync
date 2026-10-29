@@ -69,7 +69,9 @@ export function Sidebar({ status, selected, home, onSelect, onAdd, onAddFailed }
                 <div key={dir}>
                   <button className={`plain group ${isClosed ? 'closed' : ''}`} onClick={() => toggle(dir)}>
                     <Icon name="chev" className="ico chev" />
-                    <span className="gp">{tildify(dir, home)}</span>
+                    <span className="gp" title={dir}>
+                      {tildify(dir, home)}
+                    </span>
                     <span className="gc">{folders.length}</span>
                   </button>
                   {!isClosed &&
@@ -115,8 +117,8 @@ function OtherComputers({ others, home, onAddFailed }: { others: OtherRepo[]; ho
           <div className="other" key={o.key}>
             <div className="min0">
               <div className="name">{o.name}</div>
-              <div className="sub" title={o.error ?? undefined}>
-                {o.cloning ? 'Cloning…' : o.error !== null ? o.error : o.found !== null ? tildify(o.found, home) : `Not here yet · on ${o.computers.join(', ')}`}
+              <div className="sub" title={o.error ?? o.found ?? `On ${o.computers.join(', ')}`}>
+                {o.cloning ? 'Cloning…' : o.error !== null ? o.error : o.found !== null ? `Found here · ${tildify(o.found, home)}` : 'Not on this computer yet'}
               </div>
             </div>
             <div className="acts">
