@@ -1,5 +1,5 @@
 // Copied from yaseen-draw-app@89b29c9 desktop/src/main/git/exec.ts; changes: GIT_EDITOR=true, `findGit`, no stdin `input`, failure classification moved here from sync.ts (+ identity), extra `env` (gh, D28).
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -154,16 +154,38 @@ export function runCommand(command: string, root: string, timeoutMs = COMMAND_TI
   const file = windows ? 'cmd.exe' : (process.env.SHELL ?? '/bin/sh')
   const args = windows ? ['/d', '/s', '/c', `"${command}"`] : ['-l', '-c', command]
   return new Promise((resolve) => {
-    execFile(file, args, { cwd: root, timeout: timeoutMs, maxBuffer: MAX_BUFFER, windowsHide: true, windowsVerbatimArguments: windows, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err === null) {
-        resolve(null)
-        return
+    // Its own process group (`detached`), so the limit stops the command's children too, not only the shell.
+    const child = spawn(file, args, { cwd: root, windowsHide: true, windowsVerbatimArguments: windows, detached: !windows, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    const take = (chunk: Buffer) => {
+      out = `${out}${chunk.toString('utf8')}`.slice(-MAX_BUFFER)
+    }
+    child.stdout.on('data', take)
+    child.stderr.on('data', take)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (child.pid === undefined) return
+      if (windows) spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true })
+      else {
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
       }
-      const code: unknown = (err as NodeJS.ErrnoException).code
-      const why = typeof code === 'number' ? `exit code ${code}` : code === null || code === undefined ? `stopped after ${timeoutMs / 1000} s` : err.message
-      const lines = `${stdout}${stderr}`.trimEnd().split(/\r?\n/).filter((l) => l !== '').slice(-COMMAND_TAIL_LINES)
+    }, timeoutMs)
+    let settled = false
+    const done = (why: string | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (why === null) return resolve(null)
+      const lines = out.trimEnd().split(/\r?\n/).filter((l) => l !== '').slice(-COMMAND_TAIL_LINES)
       resolve([...lines, `(${why})`].join('\n'))
-    })
+    }
+    child.on('error', (err) => done(err.message))
+    child.on('close', (code) => done(timedOut ? `stopped after ${timeoutMs / 1000} s` : code === 0 ? null : `exit code ${code ?? 'unknown'}`))
   })
 }
 

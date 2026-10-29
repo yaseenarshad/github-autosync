@@ -1,4 +1,4 @@
-import { MINUTE_MS } from '@shared/status'
+import { clock, MINUTE_MS } from '@shared/status'
 import type { AppStatus, Attention, AttentionKind, FolderStatus } from '@shared/types'
 
 /**
@@ -62,7 +62,7 @@ function attentionBody(attention: Attention): string {
       return 'The command before each push failed. Nothing was pushed.'
     case 'outside-changed': {
       const files = attention.files ?? []
-      return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, outside your synced folders. Syncing is waiting for you.`
+      return `${files.length === 1 ? files[0] : `${files.length} files`} changed here and on GitHub, and AutoSync holds it back. Syncing is waiting for you.`
     }
     case 'error':
       return `Syncing has stopped: ${attention.detail ?? 'git failed'}`
@@ -85,7 +85,13 @@ export function createNoticeRules(): (status: AppStatus, now: number) => Notice[
     mem.copies = copies
     const overdue = overdueAt(f)
     if (overdue !== null && now >= overdue && mem.pendingSince !== f.pendingSince) {
-      const body = f.pr !== null ? `Changes have been waiting on pull request #${f.pr.number} for over an hour.` : 'Changes on this computer have not reached GitHub for over an hour.'
+      const due = overdue - PENDING_NOTICE_MS
+      const body =
+        f.pr !== null
+          ? `Changes have been waiting on pull request #${f.pr.number} for over an hour.`
+          : f.settings.push === 'auto'
+            ? 'Changes on this computer have not reached GitHub for over an hour.'
+            : `Changes due on GitHub at ${clock(due)} have not reached it, an hour later.`
       out.push({ folderId: f.id, title: f.name, body })
       mem.pendingSince = f.pendingSince
     }

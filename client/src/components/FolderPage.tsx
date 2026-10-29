@@ -293,8 +293,8 @@ function problemText(f: FolderStatus, a: Attention): { title: string; body: stri
     case 'outside-changed': {
       const n = a.files?.length ?? 0
       return {
-        title: `${plural(n, 'file')} outside your synced folders changed here and on GitHub`,
-        body: `AutoSync stopped before pulling, so neither version is lost. It only syncs the folders you picked, and won't overwrite either side of these files. Settle them by hand, then check again.`,
+        title: `${plural(n, 'file')} that AutoSync holds back changed here and on GitHub`,
+        body: `They are outside the folders you picked, or an open database. AutoSync stopped before pulling, so neither version is lost, and it won't overwrite either side. Settle them by hand, then check again.`,
       }
     }
     // no-git never gets here: the global banner covers it.

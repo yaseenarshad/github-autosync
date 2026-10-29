@@ -747,3 +747,30 @@ describe('push and pull per repo (D37 to D42, D52)', () => {
     h.manager.setFolders([], false)
   })
 })
+
+describe('checker 9A: an offline pull never pushes early (D37, D40)', () => {
+  const every = (push: RepoSettings['push'], pull: RepoSettings['pull'] = 1): FolderConfig => ({ ...A, settings: { ...DEFAULT_SETTINGS, push, pull } })
+  for (const push of ['manual', 60] as const) {
+    it(`push ${push}: the one retry after an offline pull is a pull too`, async () => {
+      const h = harness({ retryMs: 30, minuteMs: NEVER, pass: async (n) => (n === 1 ? result({ offline: true, level: false, fetched: false }, EDIT) : result({ level: false }, EDIT)) })
+      h.manager.setFolders([every(push)], false)
+      await until(() => h.passes.length >= 2, 1000)
+      expect(h.given.map((g) => g.publish)).toEqual([false, false])
+      h.manager.setFolders([], false)
+    })
+  }
+})
+
+describe('checker 9E: Push these now… during a send', () => {
+  it('the follow-up send still takes the whole repo once', async () => {
+    const g = gate()
+    const h = harness({ pass: (n) => (n === 1 ? g.pass(n) : Promise.resolve(result())) })
+    h.manager.setFolders([{ ...A, settings: { ...DEFAULT_SETTINGS, paths: ['docs'] } }], false)
+    await until(() => h.passes.length === 1)
+    const done = h.manager.pushOutside('a')
+    g.release()
+    await done
+    expect(h.given.map((x) => x.paths)).toEqual([['docs'], null])
+    h.manager.setFolders([], false)
+  })
+})

@@ -147,6 +147,11 @@ describe('runCommand (D49)', () => {
     const dir = await makeTemp('cmd')
     try {
       expect(await runCommand('sleep 5', dir, 200)).toMatch(/stopped after 0.2 s/)
+      // A child the command started stops with it (the whole process group).
+      expect(await runCommand('sleep 30 & echo $! > child.pid; wait', dir, 300)).toMatch(/stopped after/)
+      const pid = Number((await import('node:fs/promises').then((fs) => fs.readFile(`${dir}/child.pid`, 'utf8'))).trim())
+      await new Promise((r) => setTimeout(r, 100))
+      expect(() => process.kill(pid, 0)).toThrow()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

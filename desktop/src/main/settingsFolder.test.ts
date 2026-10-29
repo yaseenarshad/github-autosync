@@ -55,7 +55,7 @@ describe('the settings folder (D35, D36)', () => {
 
     expect(readdirSync(shared).sort()).toEqual([settingsFileName(a.registry.get().macId), settingsFileName(b.registry.get().macId)].sort())
     const file = parseSettingsFile('x', readFileSync(path.join(shared, settingsFileName(a.registry.get().macId)), 'utf8'))
-    expect(file?.repos['github.com/acme/lab']).toEqual({ remoteUrl: LAB, path: '/Users/mac-a/Lab', syncing: true, savedAt: 200, settings: { ...HOUR, push: 'manual' } })
+    expect(file?.repos['github.com/acme/lab']).toEqual({ remoteUrl: LAB, path: '/Users/mac-a/Lab', syncing: true, savedAt: 200, settings: { ...HOUR, push: 'manual' }, raw: { ...HOUR, push: 'manual' } })
   })
 
   it('keeps the newest change per repo, so two repos changed on two computers both stay', async () => {
@@ -100,5 +100,28 @@ describe('the settings folder (D35, D36)', () => {
     await vi.waitFor(() => expect(a.folder.missing()).toBe(false))
     await vi.waitFor(() => expect(readdirSync(shared)).toEqual([settingsFileName(a.registry.get().macId)]))
     expect(a.changes()).toBeGreaterThan(0)
+  })
+})
+
+describe('checker 9C: a field another build wrote that this one cannot read (D36)', () => {
+  it('keeps this computer’s value for that field, not the default', async () => {
+    const shared = await dir('sync')
+    const a = await computer('mac-a', shared, [LAB])
+    await save(a, 'github.com/acme/lab', { ...HOUR, pull: 15 }, 100)
+    const other = { name: 'mac-c', repos: { 'github.com/acme/lab': { remoteUrl: LAB, path: '/x', syncing: true, savedAt: 500, settings: { ...HOUR, push: 240, pull: 'sometimes' } } } }
+    writeFileSync(path.join(shared, 'settings-0123456789ab.json'), JSON.stringify(other))
+    await vi.waitFor(() => expect(a.registry.get().repos['github.com/acme/lab']?.savedAt).toBe(500))
+    expect(a.registry.get().repos['github.com/acme/lab']?.settings).toEqual({ ...HOUR, push: 240, pull: 15 })
+  })
+})
+
+describe('checker 9D: the settings folder with nothing changed', () => {
+  it('does not tell the app that something changed on each safety read', async () => {
+    const shared = await dir('sync')
+    const a = await computer('mac-a', shared, [LAB])
+    await a.folder.settled()
+    const before = a.changes()
+    await new Promise((r) => setTimeout(r, 300)) // rereadMs is 50 in this harness
+    expect(a.changes()).toBe(before)
   })
 })

@@ -171,7 +171,7 @@ const REBASE_TRIES = 3
  * replays them.
  */
 export async function rebaseKeepingBoth(bin: string, root: string, host: string, args: string[], picks: Picks = null): Promise<Verdict | null> {
-  const clash = await outsideClash(bin, root, picks)
+  const clash = await heldClash(bin, root, picks)
   if (clash.length > 0) return { ...CLEAN, attention: { kind: 'outside-changed', files: clash }, fetched: true }
   let failed: GitResult | null = null
   for (let left = REBASE_TRIES; ; left -= 1) {
@@ -247,13 +247,14 @@ async function parkWhileRebasing(bin: string, root: string, held: readonly strin
 }
 
 /**
- * D45: files changed here outside the picks that GitHub changed too. Parking them around the
- * rebase and copying them back would undo the other computer's change on this one, without a word,
- * so the pass stops before the rebase instead and lists them. Empty with no picks.
+ * D45, D48: files held back here — outside the picks, or an open database — that GitHub changed
+ * too. Parking them around the rebase and copying them back would undo the other computer's
+ * change on this one, without a word, so the pass stops before the rebase instead and lists them.
  */
-async function outsideClash(bin: string, root: string, picks: Picks): Promise<string[]> {
-  if (picks === null) return []
-  const outside = (await readWorking(bin, root)).filter((c) => !inPicks(picks, c.path)).map((c) => c.path)
+async function heldClash(bin: string, root: string, picks: Picks): Promise<string[]> {
+  const working = (await readWorking(bin, root)).map((c) => c.path)
+  const inUse = new Set(inUseOf(root, working))
+  const outside = working.filter((p) => !inPicks(picks, p) || inUse.has(p))
   if (outside.length === 0) return []
   const theirs = new Set(zList(await git(bin, root, ['diff', '--name-only', '-z', 'HEAD...@{u}'])))
   return outside.filter((p) => theirs.has(p)).sort()

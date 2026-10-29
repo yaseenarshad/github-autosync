@@ -137,6 +137,8 @@ async function pass(bin: string, root: string, repo: RepoState, alsoSyncedBy: Ot
   // ---------- 1. local edits become one commit (minus anything GitHub would refuse — D11) ----------
   const { failed, tooBig } = await commitPending(bin, root, opts.host, opts.settings?.paths ?? null)
   if (failed !== null) return fromFailure(failed, tooBig)
+  // D42: the quit has no time for the command, so it commits only; the next send runs it, then pushes.
+  if (command !== null && opts.flush === true) return { ...CLEAN, tooBig, policy }
 
   if (gh !== null && policy?.requiresPr === true) return { ...(await exchangeViaPr(bin, root, gh, policy, tooBig, opts)), policy }
   const { needsPr, ...pushed } = await exchange(bin, root, tooBig, opts, true)

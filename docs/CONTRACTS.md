@@ -24,7 +24,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
   - `no-gh` — the repo requires PRs and `gh` is missing or logged out (`detail`: gh's words, D28).
   - `pr-closed` — a human closed the batch's PR without merging (`detail`: its URL). Never re-sent on its own; "Send again" is `resendPullRequest` (D25).
   - `other-app` — the Docs or Draw app syncs this folder too (`detail`: `Docs` | `Draw`). AutoSync makes zero writes until its switch is off (D27).
-  - `outside-changed` — a file outside the picked folders changed here and on GitHub (`files`). The pass stops before the rebase; neither side is touched (D45).
+  - `outside-changed` — a held-back file (outside the picked folders, or an open database) changed here and on GitHub (`files`). The pass stops before the rebase; neither side of those files is touched (D45, D48). The picked folders were already committed here; nothing is pulled or pushed.
   - `before-push` — the repo's command before a push failed (`detail`: its last 20 lines and why it stopped). Nothing was committed or pushed (D49).
   - `error` — anything else, in git's own words.
 - Other folder fields:
@@ -142,7 +142,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **Pulls:** every pass arms the next quiet pull (`settings.pull` minutes, D39), also while changes wait. In Auto the pull stands down while a send is armed. A quiet pass commits here and never pushes (D40). Conflict copies do not stop it, nor do the zero-write refusals the user settles outside the app (`pr-closed`, `other-app`, `busy-repo`): the poll is how the folder notices. Any other attention (`no-gh`, `auth`, `no-identity`, `error`), offline, or edits that are settling do.
 - **Wake / unlock:** a pull, unless a pass ran in the last 10 s (`WAKE_COOLDOWN_MS`). It sends only in Auto, and does nothing when pulls are by hand (D39).
 - **Pause for a while** (D51): off until `pausedUntil`, then on again with a pass.
-- **Quit:** the watchers close, then each folder gets a flush pass (commit plus a capped push; commit only in PR mode), except a repo pushed by hand (D42). The quit is held for at most 15 s.
+- **Quit:** the watchers close, then each folder gets a flush pass (commit plus a capped push; commit only in PR mode or with a before-push command), except a repo pushed by hand (D42). The quit is held for at most 15 s.
 - **PR mode** (D24, D26):
   - The debounce is 5 min (`PR_QUIET_MS`), capped at 30 min (`PR_CAP_MS`): one PR per sitting, not per save. A fixed push timer opens the PR at its time.
   - Quiet passes (the idle poll and the PR check) never send. They may land a merged batch and receive; one that leaves changes unsent arms the debounce.
@@ -207,7 +207,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - **D39** — Pull timing per repo: every 1 to 60 min, or by hand. Pulls run while changes wait. A wake pulls, and sends only in Auto.
 - **D40** — A quiet pass never pushes, in push mode too. It commits here, fetches and rebases.
 - **D41** — Before a push, AutoSync's own unpushed commits fold into one; a commit made by hand stops the fold. Not in PR mode.
-- **D42** — The quit flush skips a repo pushed by hand, and obeys the picks.
+- **D42** — The quit flush skips a repo pushed by hand, and obeys the picks. A repo with a before-push command only commits on quit; the next send runs the command, then pushes.
 - **D43** — The pending notice comes an hour after the push was due; never for a repo pushed by hand. Changes D7.
 - **D44** — Picked folders: only they are staged; the pull is still the whole repo. Changes D9.
 - **D45** — A file outside the picks changed here and on GitHub stops the pass before the rebase (`outside-changed`); AutoSync never undoes the other side.

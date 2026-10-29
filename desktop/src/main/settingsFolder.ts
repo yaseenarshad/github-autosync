@@ -37,7 +37,10 @@ export interface MacRepo {
   /** On and syncing there. */
   syncing: boolean
   savedAt: number
+  /** For showing (D53): each field this build cannot read is the default. */
   settings: RepoSettings
+  /** As read from another computer's file, for taking it (D36): a field this build cannot read keeps this computer's value. */
+  raw?: unknown
 }
 
 /** Another computer's file. */
@@ -107,7 +110,7 @@ export function parseSettingsFile(macId: string, text: string): MacFile | null {
   for (const [key, entry] of Object.entries(v.repos as Record<string, unknown>)) {
     const r = entry as Partial<Record<keyof MacRepo, unknown>> | null
     if (r === null || typeof r !== 'object' || typeof r.remoteUrl !== 'string' || typeof r.path !== 'string' || typeof r.savedAt !== 'number' || !Number.isFinite(r.savedAt)) continue
-    repos[key] = { remoteUrl: r.remoteUrl, path: r.path, syncing: r.syncing === true, savedAt: r.savedAt, settings: readSettings(r.settings, DEFAULT_SETTINGS) }
+    repos[key] = { remoteUrl: r.remoteUrl, path: r.path, syncing: r.syncing === true, savedAt: r.savedAt, settings: readSettings(r.settings, DEFAULT_SETTINGS), raw: r.settings }
   }
   return { macId, name: typeof v.name === 'string' ? v.name : '', repos }
 }
@@ -122,7 +125,7 @@ export function takeNewer(config: Config, files: readonly MacFile[]): Config | n
     for (const [key, theirs] of Object.entries(file.repos)) {
       const ours = next.repos[key]
       if (theirs.savedAt <= (ours?.savedAt ?? 0)) continue
-      next = withRepoSettings(next, key, readSettings(theirs.settings, ours?.settings ?? DEFAULT_SETTINGS), theirs.savedAt)
+      next = withRepoSettings(next, key, readSettings(theirs.raw ?? theirs.settings, ours?.settings ?? DEFAULT_SETTINGS), theirs.savedAt)
     }
   }
   return next === config ? null : next
@@ -187,10 +190,13 @@ export function followSettingsFolder(registry: Registry, deps: SettingsFolderDep
     if (dir === null) return
     const names = (await readdir(dir)).filter((name) => SETTINGS_FILE.test(name) && name !== own())
     const read = await Promise.all(names.map((name) => readFile(path.join(dir, name), 'utf8').then((text) => parseSettingsFile(name.slice('settings-'.length, -'.json'.length), text), () => null)))
-    files = read.filter((f): f is MacFile => f !== null)
+    const fresh = read.filter((f): f is MacFile => f !== null)
+    // The safety read finds the same files nearly every time: only news reaches the app (it starts a clone search, D53).
+    const same = JSON.stringify(fresh) === JSON.stringify(files)
+    files = fresh
     const next = takeNewer(registry.get(), files)
     if (next !== null) registry.update(() => next)
-    deps.onChange()
+    if (!same || next !== null) deps.onChange()
     // Taking a newer repo, or a folder this computer has never written to, both leave this file behind.
     await push()
   }

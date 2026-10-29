@@ -848,3 +848,42 @@ describe('open databases and the command before a push (D48, D49)', () => {
     REAL_GIT_TIMEOUT_MS,
   )
 })
+
+describe('checker 9B: an open database that a teammate changed (D48, D45)', () => {
+  it(
+    'never undoes the teammate’s version without a word',
+    async () => {
+      const { repo, remote } = await pushedRepo({ 'note.md': 'line one\n', '.gitignore': '*.db-wal\n', 'data/lab.db': 'v1\n' })
+      const b = await otherComputer(remote)
+      await pushFrom(b, { 'data/lab.db': 'teammate\n' })
+      await repo.write('data/lab.db', 'mine\n')
+      await repo.write('data/lab.db-wal', 'pages\n')
+      await repo.write('note.md', 'edit\n')
+
+      const first = await pass(repo)
+      const stopped = first.attention !== null
+      await unlink(path.join(repo.root, 'data/lab.db-wal'))
+      if (!stopped) await pass(repo)
+      await b.run(['pull', '-q'])
+      const kept = (await b.run(['ls-files', 'data'])).split('\n').filter((l) => l !== '')
+      const contents = await Promise.all(kept.map((rel) => b.read(rel)))
+      // Either the pass stopped and said so, or the teammate's bytes are still somewhere on GitHub.
+      expect(stopped || contents.includes('teammate\n')).toBe(true)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})
+
+describe('checker 9F: the quit and the command before a push (D49, D42)', () => {
+  it(
+    'a quit flush never pushes past a command that fails',
+    async () => {
+      const { repo, remote } = await pushedRepo()
+      const head = await repo.run(['rev-parse', 'HEAD'])
+      await repo.write('notes/secret.md', 'sk-or-' + 'v1-not-a-real-key\n')
+      await pass(repo, { flush: true, settings: { push: 'auto', pull: 1, paths: null, beforePush: 'echo found a key 1>&2; exit 1' } })
+      expect(await remoteHead(repo, remote)).toBe(head)
+    },
+    REAL_GIT_TIMEOUT_MS,
+  )
+})

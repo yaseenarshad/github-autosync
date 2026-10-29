@@ -23,8 +23,8 @@ import { isRepoPath, newFolder, withAlias, withRepoSettings, type Config, type R
 /** D53, D54: the other computers' repos, as `index.ts` keeps them. */
 export interface OthersDeps {
   find(key: string): OtherRepo | undefined
-  /** A clone started, ended or failed. */
-  mark(key: string, state: { cloning: boolean; error: string | null }): void
+  /** A clone started or failed; null forgets it (done). */
+  mark(key: string, state: { cloning: boolean; error: string | null } | null): void
   /** Look for clones again (a folder was added). */
   refresh(): void
 }
@@ -142,7 +142,7 @@ export function registerIpc(deps: IpcDeps): void {
       if (parent === null) return
       deps.others.mark(key, { cloning: true, error: null })
       const cloned = await cloneInto(other.remoteUrl, parent, other.name)
-      deps.others.mark(key, { cloning: false, error: cloned.ok ? null : cloned.error })
+      deps.others.mark(key, cloned.ok ? null : { cloning: false, error: cloned.error })
       if (cloned.ok) {
         change((c) => ({ ...c, folders: [...c.folders, newFolder(cloned.path, other.remoteUrl)] }))
         deps.others.refresh()

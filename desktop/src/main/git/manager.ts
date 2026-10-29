@@ -358,13 +358,16 @@ export function createSyncManager(host: SyncHost): SyncManager {
       e.direction = null
       host.onChange()
     }
+    // D46: taken here, so a "Push these now…" asked during this pass goes with the follow-up.
+    const outsideNow = e.outsideOnce && mode !== 'quiet'
+    if (outsideNow) e.outsideOnce = false
     const res = await host
       .sync(e.cfg.path, {
         flush: mode === 'flush',
         policy: e.policy,
         publish: mode !== 'quiet',
         // D46: "Push these now…" sends the whole repo once.
-        settings: e.outsideOnce && mode !== 'quiet' ? { ...settingsOf(e), paths: null } : settingsOf(e),
+        settings: outsideNow ? { ...settingsOf(e), paths: null } : settingsOf(e),
         onDirection: (direction) => {
           if (mode === 'quiet' || !current(e)) return
           e.direction = direction
@@ -372,7 +375,6 @@ export function createSyncManager(host: SyncHost): SyncManager {
         },
       })
       .catch(crashed)
-    if (mode !== 'quiet') e.outsideOnce = false
     e.syncing = false
     e.direction = null
     e.lastPassAt = Date.now()
@@ -383,9 +385,10 @@ export function createSyncManager(host: SyncHost): SyncManager {
       if (e.active && mode !== 'flush') {
         if (res.offline) {
           e.retryAt = Date.now() + retryMs
+          // The one retry repeats what failed: a pull stays a pull, so nothing goes early (D37, D40).
           e.retry = arm(retryMs, () => {
             e.retry = e.retryAt = null
-            void requestPass(e, 'normal')
+            void requestPass(e, mode === 'quiet' ? 'quiet' : 'normal')
           })
         }
         // Conflict copies never stop syncing; any other attention, or offline, leaves the next move to the retry or the user.
@@ -578,8 +581,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
         if (e.busy || now - e.lastPassAt < wakeCooldownMs) continue
         // D39: a wake pulls; it sends only where sends are Auto anyway, and stays quiet where pulls are by hand.
         const { push, pull } = settingsOf(e)
-        if (push === 'auto') void requestPass(e, 'normal')
-        else if (pull !== 'manual') void requestPass(e, 'quiet')
+        if (pull === 'manual') continue
+        void requestPass(e, push === 'auto' ? 'normal' : 'quiet')
       }
     },
 

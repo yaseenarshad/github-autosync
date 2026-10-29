@@ -253,7 +253,8 @@ void app.whenReady().then(() => {
     others: {
       find: (key) => othersNow().find((o) => o.key === key),
       mark: (key, state) => {
-        cloneState.set(key, state)
+        if (state === null) cloneState.delete(key)
+        else cloneState.set(key, state)
         refresh()
       },
       refresh: findOthers,

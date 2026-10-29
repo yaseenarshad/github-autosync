@@ -92,8 +92,8 @@ export function attentionPrompt(f: FolderStatus, a: Attention): string {
       )
     case 'outside-changed':
       return (
-        `In ${where(f)}, GitHub AutoSync syncs only these folders: ${(f.settings.paths ?? []).join(', ')}. ` +
-        'These files outside them changed on this computer and also on GitHub, so AutoSync stopped before pulling:\n' +
+        `In ${where(f)}, GitHub AutoSync holds some files back: files outside the synced folders (${(f.settings.paths ?? ['the whole repo']).join(', ')}), and open databases (a -wal or -journal file beside them). ` +
+        'These held-back files changed on this computer and also on GitHub, so AutoSync stopped before pulling:\n' +
         (a.files ?? []).map((p) => `- ${p}`).join('\n') +
         '\n\nFor each file, compare my local change with the version on GitHub ("git fetch", then "git diff HEAD...@{u} -- <file>" and "git diff -- <file>"). ' +
         'Keep what matters from both: commit and push it by hand, or put my change aside if GitHub\'s version is right. ' +

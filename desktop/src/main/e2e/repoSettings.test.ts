@@ -53,6 +53,9 @@ async function computer(host: string, shared: string): Promise<Computer> {
   return { registry, folder, manager, apply, status: () => manager.folders()[0] as FolderStatus }
 }
 
+/** Real git on a cold CI runner (Windows) takes seconds; `vi.waitFor` waits 1 s by default. */
+const SLOW = { timeout: 15_000, interval: 50 }
+
 const HOURLY_DOCS: RepoSettings = { push: 60, pull: 5, paths: ['docs'], beforePush: null }
 
 describe('YAZ-3701: settings that travel, picked folders, one commit per push', { timeout: REAL_GIT_TIMEOUT_MS * 3 }, () => {
@@ -69,10 +72,10 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
     a.apply()
     a.folder.changed()
     await a.folder.flush()
-    await vi.waitFor(() => expect(a.status().lastCheckedAt).not.toBeNull())
+    await vi.waitFor(() => expect(a.status().lastCheckedAt).not.toBeNull(), SLOW)
 
     // Mac B lists it under "On your other computers", with A's settings already in hand.
-    await vi.waitFor(() => expect(othersFrom(b.registry.get(), b.folder.others(), '/nowhere').map((o) => [o.key, o.computers])).toEqual([[key, ['Mac-A']]]))
+    await vi.waitFor(() => expect(othersFrom(b.registry.get(), b.folder.others(), '/nowhere').map((o) => [o.key, o.computers])).toEqual([[key, ['Mac-A']]]), SLOW)
     expect(b.registry.get().repos[key]?.settings).toEqual(HOURLY_DOCS)
 
     // Clone…, then the folder is added: it runs with A's settings at once.
@@ -83,7 +86,7 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
     b.registry.update((c) => ({ ...c, folders: [newFolder(cloned.path, remote.url)] }))
     b.apply()
     expect(b.status().settings).toEqual(HOURLY_DOCS)
-    await vi.waitFor(() => expect(b.status().lastCheckedAt).not.toBeNull())
+    await vi.waitFor(() => expect(b.status().lastCheckedAt).not.toBeNull(), SLOW)
 
     // A edits docs twice with a pull between: nothing reaches GitHub before the push is due.
     const start = await remoteHead(aRepo, remote)
@@ -93,7 +96,7 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
     }
     await write(aRepo.root, 'docs/one.md', 'one\n')
     a.manager.notifyWake() // a wake pulls; it never pushes a timer repo (D39)
-    await vi.waitFor(() => expect(a.status().pending.map((c) => c.path)).toContain('docs/one.md'))
+    await vi.waitFor(() => expect(a.status().pending.map((c) => c.path)).toContain('docs/one.md'), SLOW)
     await write(aRepo.root, 'docs/two.md', 'two\n')
     await write(aRepo.root, 'app/local.db', 'stays here\n')
     expect(await remoteHead(aRepo, remote)).toBe(start)
@@ -107,7 +110,7 @@ describe('YAZ-3701: settings that travel, picked folders, one commit per push', 
 
     // B pulls on a wake and has A's docs, but not A's local file.
     b.manager.notifyWake()
-    await vi.waitFor(() => expect(existsSync(path.join(cloned.path, 'docs', 'two.md'))).toBe(true))
+    await vi.waitFor(() => expect(existsSync(path.join(cloned.path, 'docs', 'two.md'))).toBe(true), SLOW)
     expect(existsSync(path.join(cloned.path, 'app', 'local.db'))).toBe(false)
   })
 })
