@@ -115,11 +115,14 @@ function Field({ label, info, children }: { label: string; info: string; childre
   )
 }
 
-/** The explanation, on hover: the page stays one line a setting. */
+/**
+ * The explanation, on hover or on a click (focus): the page stays one line a setting. A drawn
+ * bubble, not the native `title` tooltip, which this window does not show reliably.
+ */
 export function Info({ text }: { text: string }) {
   return (
-    <span className="info" title={text} aria-label={text} role="img">
+    <button type="button" className="info" aria-label={text} data-tip={text} onClick={(e) => e.stopPropagation()}>
       <Icon name="info" />
-    </span>
+    </button>
   )
 }
