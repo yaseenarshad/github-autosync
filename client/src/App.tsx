@@ -53,7 +53,7 @@ export function App() {
       {titlebar}
       <Toolbar status={status} folder={folder} onOverview={() => setSelected(null)} onSheet={setSheet} />
       <div className="body">
-        <Sidebar status={status} selected={folder?.id ?? null} home={home} onSelect={setSelected} onAdd={openAdd} onAddFailed={(verdict) => setSheet({ kind: 'add', verdict })} />
+        <Sidebar status={status} selected={folder?.id ?? null} home={home} onSelect={setSelected} onAdd={openAdd} onSheet={setSheet} />
         <main className="main">
           {status.folders.length === 0 ? (
             <FirstRun onAdd={openAdd} />
@@ -71,7 +71,9 @@ export function App() {
           )}
         </main>
       </div>
-      {sheet && <AppSheet sheet={sheet} status={status} home={home} onClose={() => setSheet(null)} onSelect={setSelected} />}
+      {sheet && (
+        <AppSheet sheet={sheet} status={status} home={home} onClose={() => setSheet(null)} onSelect={setSelected} onAddFailed={(verdict) => setSheet({ kind: 'add', verdict })} />
+      )}
     </div>
   )
 }

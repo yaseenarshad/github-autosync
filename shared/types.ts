@@ -162,6 +162,8 @@ export interface OtherRepo {
   error: string | null
   /** "Not on this Mac": hidden until Settings → Show hidden repos. */
   hidden: boolean
+  /** The settings it starts with when added here (D35): the newest any computer saved. */
+  settings: RepoSettings
 }
 
 /** D10: the Activity log is read from git history only. */

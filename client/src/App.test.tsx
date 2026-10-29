@@ -356,7 +356,7 @@ describe('sync settings (D34, D35)', () => {
   })
 
   it('lists the other computers’ repos: Add, Clone…, and Not on this computer (D53, D54)', async () => {
-    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false }
+    const other = { name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio'], cloning: false, error: null, hidden: false, settings: { push: 60, pull: 5, paths: ['docs'], beforePush: null } }
     const others = [
       { ...other, key: 'github.com/me/lab', expectedPath: '/Users/yasin/GitHub/lab', found: '/Users/yasin/GitHub/lab' },
       { ...other, key: 'github.com/me/new', name: 'new', expectedPath: '/Users/yasin/GitHub/new', found: null },
@@ -368,14 +368,23 @@ describe('sync settings (D34, D35)', () => {
 
     api.addOther.mockResolvedValueOnce({ ok: false, path: '/Users/yasin/GitHub/lab', reason: 'auth' })
     const inOthers = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('.others button')].find((b) => b.textContent === text)!
-    await click(inOthers('Add'))
+    // Each one explains and asks first (D15): nothing happens before the confirm.
+    await click(inOthers('Add…'))
+    expect(api.addOther).not.toHaveBeenCalled()
+    expect(dialog()?.textContent).toContain('Push: Every 1 hour')
+    await click(button('Start syncing'))
     expect(api.addOther).toHaveBeenCalledWith('github.com/me/lab')
-    expect(dialog()).not.toBeNull() // the Add sheet shows why
+    expect(dialog()?.textContent).toContain('Add') // the Add sheet shows why it failed
 
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     await click(inOthers('Clone…'))
+    expect(api.cloneOther).not.toHaveBeenCalled()
+    await click(button('Choose a folder…'))
     expect(api.cloneOther).toHaveBeenCalledWith('github.com/me/new')
+
     await click(document.querySelector<HTMLButtonElement>('button[aria-label="Not on this computer: new"]')!)
+    expect(api.hideOther).not.toHaveBeenCalled()
+    await click([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent === 'Hide')!)
     expect(api.hideOther).toHaveBeenCalledWith('github.com/me/new')
   })
 

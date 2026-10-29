@@ -39,7 +39,7 @@ describe('the other computers’ repos (D53)', () => {
     ]
     const cfg = await config([newFolder('/Users/yasin/notes', 'https://github.com/Me/Notes.git')], ['github.com/me/lab'])
     expect(othersFrom(cfg, files, '/Users/yasin')).toEqual([
-      { key: 'github.com/me/lab', name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio', 'MacBook-Air'], expectedPath: path.join('/Users/yasin', 'GitHub', 'lab'), found: null, cloning: false, error: null, hidden: true },
+      { key: 'github.com/me/lab', name: 'lab', remoteUrl: 'https://github.com/me/lab.git', computers: ['Mac-Studio', 'MacBook-Air'], expectedPath: path.join('/Users/yasin', 'GitHub', 'lab'), found: null, cloning: false, error: null, hidden: true, settings: DEFAULT_SETTINGS },
     ])
   })
 

@@ -46,6 +46,7 @@ export function othersFrom(config: Config, files: readonly MacFile[], home: stri
         cloning: false,
         error: null,
         hidden: config.hiddenRepos.includes(key),
+        settings: config.repos[key]?.settings ?? repo.settings,
       })
     }
   }

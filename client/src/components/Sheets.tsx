@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AppStatus, FolderStatus, FolderVerdict, ThemeChoice } from '@shared/types'
-import { CHECKS_EVERY, SENDS_AFTER } from '@shared/status'
+import type { AppStatus, FolderStatus, FolderVerdict, OtherRepo, ThemeChoice } from '@shared/types'
+import { CHECKS_EVERY, pullLabel, pushLabel, SENDS_AFTER } from '@shared/status'
 import { AddFolderSheet } from './AddFolderSheet'
 import { FolderPickerSheet } from './FolderPicker'
 import { platform } from '../lib/platform'
@@ -16,6 +16,9 @@ export type SheetState =
   | { kind: 'rename'; id: string }
   | { kind: 'pick-folders'; id: string }
   | { kind: 'push-outside'; id: string }
+  | { kind: 'add-other'; key: string }
+  | { kind: 'clone-other'; key: string }
+  | { kind: 'hide-other'; key: string }
 
 interface SheetProps {
   title: string
@@ -187,9 +190,11 @@ interface AppSheetProps {
   home: string | null
   onClose: () => void
   onSelect: (id: string | null) => void
+  /** D53: an Add whose checks failed shows the Add sheet with the reason. */
+  onAddFailed: (verdict: FolderVerdict) => void
 }
 
-export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetProps) {
+export function AppSheet({ sheet, status, home, onClose, onSelect, onAddFailed }: AppSheetProps) {
   const api = window.autosync
 
   switch (sheet.kind) {
@@ -226,6 +231,13 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
           </p>
         </ConfirmSheet>
       )
+  }
+
+  if (sheet.kind === 'add-other' || sheet.kind === 'clone-other' || sheet.kind === 'hide-other') {
+    // A status push can drop the repo (added elsewhere, or no longer synced) while its sheet is open.
+    const other = status.others.find((o) => o.key === sheet.key)
+    if (!other) return null
+    return <OtherSheet kind={sheet.kind} other={other} onClose={onClose} onAddFailed={onAddFailed} />
   }
 
   // A status push can remove the folder while its sheet is open.
@@ -294,6 +306,60 @@ export function AppSheet({ sheet, status, home, onClose, onSelect }: AppSheetPro
               <li key={c.path}>{c.path}</li>
             ))}
           </ul>
+        </ConfirmSheet>
+      )
+  }
+}
+
+/** D53, D54: Add, Clone… and hide each say what will happen before anything does (D15). */
+function OtherSheet({ kind, other: o, onClose, onAddFailed }: { kind: 'add-other' | 'clone-other' | 'hide-other'; other: OtherRepo; onClose: () => void; onAddFailed: (verdict: FolderVerdict) => void }) {
+  const api = window.autosync
+  const from = o.computers.join(', ')
+  const settings = (
+    <ul className="files">
+      <li>Push: {pushLabel(o.settings.push)}</li>
+      <li>Pull: {pullLabel(o.settings.pull)}</li>
+      <li>Folders: {o.settings.paths === null ? 'the whole repo' : o.settings.paths.join(', ')}</li>
+      {o.settings.beforePush !== null && <li>Before each push: {o.settings.beforePush}</li>}
+    </ul>
+  )
+  switch (kind) {
+    case 'add-other':
+      return (
+        <ConfirmSheet
+          title={`Start syncing “${o.name}” on ${platform.here}?`}
+          confirm="Start syncing"
+          onConfirm={async () => {
+            const verdict = await api.addOther(o.key)
+            if (!verdict.ok) onAddFailed(verdict)
+          }}
+          onClose={onClose}
+        >
+          <p className="first">
+            {from} syncs this repo. AutoSync found a copy here: <span className="mono">{o.found}</span>. It will pull what changed, then sync with the same
+            settings as {from}:
+          </p>
+          {settings}
+          <p className="muted last">You can change them later under Sync settings. They change on every computer.</p>
+        </ConfirmSheet>
+      )
+    case 'clone-other':
+      return (
+        <ConfirmSheet title={`Download “${o.name}” to ${platform.here}?`} confirm="Choose a folder…" onConfirm={() => api.cloneOther(o.key)} onClose={onClose}>
+          <p className="first">
+            {from} syncs this repo, and {platform.here} has no copy yet. AutoSync downloads it from <span className="mono">{o.remoteUrl}</span> into a folder you
+            pick, then syncs it with these settings:
+          </p>
+          {settings}
+          <p className="muted last">A big repo can take a few minutes. Nothing is changed on {from} or on GitHub.</p>
+        </ConfirmSheet>
+      )
+    case 'hide-other':
+      return (
+        <ConfirmSheet title={`Hide “${o.name}” on ${platform.here}?`} confirm="Hide" onConfirm={() => api.hideOther(o.key)} onClose={onClose}>
+          <p className="first last">
+            It stays synced on {from}. It just won't show here. Settings → Show hidden repos brings it back.
+          </p>
         </ConfirmSheet>
       )
   }

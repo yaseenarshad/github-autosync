@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { AppStatus, FolderStatus, FolderVerdict, OtherRepo } from '@shared/types'
+import type { AppStatus, FolderStatus, OtherRepo } from '@shared/types'
+import type { SheetState } from './Sheets'
 import { parentDir, tildify } from '../lib/format'
 import { headline } from '@shared/status'
 import { folderView } from '../lib/summary'
@@ -12,11 +13,11 @@ interface Props {
   home: string | null
   onSelect: (id: string | null) => void
   onAdd: () => void
-  /** D53: a one-click Add whose checks failed shows the Add sheet with the reason. */
-  onAddFailed: (verdict: FolderVerdict) => void
+  /** D53, D54: Add, Clone… and hide open a sheet that explains and confirms first. */
+  onSheet: (sheet: SheetState) => void
 }
 
-export function Sidebar({ status, selected, home, onSelect, onAdd, onAddFailed }: Props) {
+export function Sidebar({ status, selected, home, onSelect, onAdd, onSheet }: Props) {
   const [filter, setFilter] = useState('')
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
   const q = filter.trim().toLowerCase()
@@ -84,7 +85,7 @@ export function Sidebar({ status, selected, home, onSelect, onAdd, onAddFailed }
             {q && groups.size === 0 && <div className="list-note">No folders match “{filter.trim()}”.</div>}
           </>
         )}
-        <OtherComputers others={status.others.filter((o) => !o.hidden)} home={home} onAddFailed={onAddFailed} />
+        <OtherComputers others={status.others.filter((o) => !o.hidden)} home={home} onSheet={onSheet} />
       </div>
       <div className="side-foot">
         <button className="btn-quiet" onClick={onAdd}>
@@ -97,14 +98,9 @@ export function Sidebar({ status, selected, home, onSelect, onAdd, onAddFailed }
 }
 
 /** D53, D54: repos the other computers sync and this one does not. Nothing turns on before a click. */
-function OtherComputers({ others, home, onAddFailed }: { others: OtherRepo[]; home: string | null; onAddFailed: (verdict: FolderVerdict) => void }) {
+function OtherComputers({ others, home, onSheet }: { others: OtherRepo[]; home: string | null; onSheet: (sheet: SheetState) => void }) {
   const [closed, setClosed] = useState(false)
   if (others.length === 0) return null
-  const api = window.autosync
-  async function add(key: string) {
-    const verdict = await api.addOther(key)
-    if (!verdict.ok) onAddFailed(verdict)
-  }
   return (
     <div className="others">
       <button className={`plain group ${closed ? 'closed' : ''}`} onClick={() => setClosed(!closed)}>
@@ -123,15 +119,15 @@ function OtherComputers({ others, home, onAddFailed }: { others: OtherRepo[]; ho
             </div>
             <div className="acts">
               {o.found !== null ? (
-                <button className="btn" onClick={() => add(o.key)}>
-                  Add
+                <button className="btn" onClick={() => onSheet({ kind: 'add-other', key: o.key })}>
+                  Add…
                 </button>
               ) : (
-                <button className="btn" disabled={o.cloning} onClick={() => api.cloneOther(o.key)}>
+                <button className="btn" disabled={o.cloning} onClick={() => onSheet({ kind: 'clone-other', key: o.key })}>
                   Clone…
                 </button>
               )}
-              <button className="x" aria-label={`Not on this computer: ${o.name}`} title="Not on this computer" onClick={() => api.hideOther(o.key)}>
+              <button className="x" aria-label={`Not on this computer: ${o.name}`} title="Not on this computer" onClick={() => onSheet({ kind: 'hide-other', key: o.key })}>
                 ×
               </button>
             </div>
