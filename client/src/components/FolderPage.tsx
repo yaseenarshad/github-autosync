@@ -10,6 +10,7 @@ import { CopyPromptButton } from './CopyPromptButton'
 import { Icon } from './Icon'
 import type { SheetState } from './Sheets'
 import { Fold } from './Fold'
+import { FolderInfo } from './FolderInfo'
 import { SyncSettings } from './SyncSettings'
 import { Ago, Countdown, LastSynced } from './Time'
 
@@ -54,6 +55,7 @@ export function FolderPage({ folder: f, status, onSheet }: Props) {
               ) : (
                 <span className="one">{repoLabel(f.remoteUrl ?? '')}</span>
               )}
+              <FolderInfo folder={f} />
             </div>
           )}
           <div className="pills">

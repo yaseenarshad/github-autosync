@@ -253,6 +253,16 @@ button.tb[disabled] { cursor: not-allowed; opacity: .55; }
 .meta .link .ico { width: 11px; height: 11px; }
 .meta .one { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; font-size: 12px; }
 .meta .sep { flex: none; }
+.folder-info { position: relative; display: inline-flex; flex: none; }
+.popover {
+  position: absolute; left: -10px; top: calc(100% + 8px); z-index: 40; width: 420px; max-width: 70vw; padding: 12px;
+  background: var(--pane); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .14); color: var(--text);
+}
+.pop-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 10px; }
+.pop-label:first-child { margin-top: 0; }
+.pop-value { font-size: 12px; margin-top: 3px; word-break: break-all; user-select: text; }
+.pop-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pop-acts .btn { height: 26px; font-size: 12px; }
 .pills:empty { display: none; }
 .status.synced .h { color: var(--ok); }
 .status.pending .h { color: var(--warn); }

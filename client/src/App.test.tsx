@@ -396,6 +396,17 @@ describe('sync settings (D34, D35)', () => {
     expect(document.querySelector('select[aria-label="Push"]')).toBeNull()
   })
 
+  it('the ⓘ beside the repo shows where the folder is, and copies its path', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Where this folder is"]')!)
+    expect(document.querySelector('.popover')?.textContent).toContain('/Users/yasin/Documents/GitHub/notes')
+    await click(button('Copy path'))
+    expect(api.copyText).toHaveBeenCalledWith('/Users/yasin/Documents/GitHub/notes')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    expect(document.querySelector('.popover')).toBeNull()
+  })
+
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {
     const api = await mount(makeStatus([makeFolder({ id: 'notes' })], { settingsFolder: '/Users/yasin/Sync/autosync' }))
     api.pickSettingsFolder.mockResolvedValue('/Users/yasin/Sync/other')
