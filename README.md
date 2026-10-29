@@ -142,7 +142,7 @@ The app does not come from an app store, so macOS and Windows ask you one time. 
   <sub>Mac with Apple Silicon (<code>.dmg</code>) · Windows 64-bit (<code>-setup.exe</code>) · Needs git and the GitHub CLI</sub>
 </p>
 
-1. Install git and the GitHub CLI. Mac: `brew install git gh`. Windows: `winget install Git.Git`, then `winget install GitHub.cli`.
+1. Install git and the GitHub CLI. Mac: `brew install git gh`. AutoSync uses Homebrew's git first, so an Xcode update does not stop it. Windows: `winget install Git.Git`, then `winget install GitHub.cli`.
 2. Sign in to GitHub: `gh auth login`, then `gh auth setup-git`.
 3. Clone the repo that you want to sync.
 4. Install and open GitHub AutoSync. On a Mac, the first time: System Settings → Privacy & Security → **Open Anyway**. On Windows: **More info** → **Run anyway**.

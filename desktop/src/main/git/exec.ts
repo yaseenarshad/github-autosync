@@ -18,14 +18,15 @@ import path from 'node:path'
 /**
  * Where each OS keeps git, in the order we prefer it.
  *
- *   - darwin: Apple's Command Line Tools shim, then Homebrew. Presence is not proof it WORKS — on a
- *     Mac without the CLT, `/usr/bin/git` is a shim that exits non-zero (`findGit` checks).
+ *   - darwin: Homebrew (Apple Silicon, then Intel), standalone Command Line Tools, then Apple's
+ *     shim. Prefer binaries independent of Xcode's selected developer directory and license.
+ *     Presence is not proof it WORKS — `findGit` tries each candidate until one runs.
  *   - win32: Git for Windows, machine-wide (`%ProgramFiles%`, legacy 32-bit prefix) or per-user
  *     (`%LOCALAPPDATA%\Programs`); `cmd\git.exe` is the launcher meant for outside callers.
  *   - anything else (Linux): the distro package and the source-install prefix.
  */
 export function gitCandidates(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): readonly string[] {
-  if (platform === 'darwin') return ['/usr/bin/git', '/opt/homebrew/bin/git']
+  if (platform === 'darwin') return ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/Library/Developer/CommandLineTools/usr/bin/git', '/usr/bin/git']
   if (platform === 'win32') {
     const out: string[] = []
     const prefixes = [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs')]
@@ -78,12 +79,14 @@ export async function findGit(candidates: readonly string[] = GIT_CANDIDATES): P
   const known = working.get(candidates)
   if (known !== undefined && (await stat(known).catch(() => null))?.isFile() === true) return known
   working.delete(candidates)
-  const bin = await resolveBin(candidates)
-  if (bin === null) return null
-  const version = await git(bin, path.parse(process.cwd()).root, ['--version']).catch(() => null)
-  if (version?.code !== 0) return null
-  working.set(candidates, bin)
-  return bin
+  for (const bin of candidates) {
+    if ((await stat(bin).catch(() => null))?.isFile() !== true) continue
+    const version = await git(bin, path.parse(process.cwd()).root, ['--version']).catch(() => null)
+    if (version?.code !== 0) continue
+    working.set(candidates, bin)
+    return bin
+  }
+  return null
 }
 
 /**

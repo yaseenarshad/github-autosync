@@ -34,11 +34,21 @@ describe('resolveBin / findGit', () => {
   it('refuses a binary that exists but does not run git (the macOS CLT shim without the tools)', async () => {
     expect(await findGit(['/usr/bin/false'])).toBeNull()
   })
+
+  it.skipIf(process.platform === 'win32')('tries the next candidate when an installed binary cannot run', async () => {
+    const bin = await requireGit()
+    expect(await findGit(['/usr/bin/false', bin])).toBe(bin)
+  })
 })
 
 describe('gitCandidates', () => {
-  it('on a Mac prefers the Command Line Tools shim, then Homebrew', () => {
-    expect(gitCandidates('darwin')).toEqual(['/usr/bin/git', '/opt/homebrew/bin/git'])
+  it('on a Mac prefers standalone Git installations before the Xcode-dependent shim', () => {
+    expect(gitCandidates('darwin')).toEqual([
+      '/opt/homebrew/bin/git',
+      '/usr/local/bin/git',
+      '/Library/Developer/CommandLineTools/usr/bin/git',
+      '/usr/bin/git',
+    ])
   })
 
   it('on Windows lists Git for Windows under each install prefix, cmd launcher before bin', () => {
