@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AppStatus, Attention, FolderStatus } from '@shared/types'
-import { checksEvery, clock, isGitHubUrl, OPENS_PR_AFTER, plural, SENDS_AFTER } from '@shared/status'
+import { checksEvery, clock, isGitHubUrl, OPENS_PR_AFTER, PAUSES, plural, SENDS_AFTER } from '@shared/status'
 import { formatBytes, tildify, webLabel } from '../lib/format'
 import { platform } from '../lib/platform'
 import { attentionPrompt, tooBigPrompt } from '../lib/prompts'
@@ -21,7 +21,7 @@ interface Props {
 
 export function FolderPage({ folder: f, status, home, onSheet }: Props) {
   const v = folderView(f, status)
-  const active = f.enabled && !status.paused
+  const active = f.enabled && !status.paused && f.pausedUntil === null
   const problem = f.attention && f.attention.kind !== 'no-git' && active && !status.gitMissing ? f.attention : null
   const api = window.autosync
 
@@ -77,6 +77,12 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
             <StatusSub folder={f} view={v} />
           </div>
         </div>
+        {v.kind === 'paused-until' && (
+          <button className="btn" onClick={() => api.pauseFolder(f.id, null)}>
+            <Icon name="sync" />
+            Resume now
+          </button>
+        )}
         {active && !status.gitMissing && v.cls !== 'syncing' && (
           <button className="btn" onClick={() => api.syncNow(f.id)}>
             <Icon name={pushesLater(f) ? 'up' : 'sync'} />
@@ -104,6 +110,17 @@ export function FolderPage({ folder: f, status, home, onSheet }: Props) {
               <button className="btn" onClick={() => api.openExternal(f.webUrl!)}>
                 View on GitHub
               </button>
+            </Action>
+          )}
+          {active && (
+            <Action title="Pause this folder for a while" detail="It turns back on by itself, and catches up right away.">
+              <div className="acts">
+                {PAUSES.map(([minutes, label]) => (
+                  <button className="btn" key={minutes} onClick={() => api.pauseFolder(f.id, minutes)}>
+                    {label.replace('Pause for ', '')}
+                  </button>
+                ))}
+              </div>
             </Action>
           )}
           <Action title="Stop syncing this folder" detail={`Removes it from AutoSync only. Files stay on ${platform.yours} and on GitHub.`}>
@@ -138,6 +155,8 @@ function StatusSub({ folder: f, view }: { folder: FolderStatus; view: FolderView
       return <>Nothing is committed, pulled, or pushed. Turn it on to start again.</>
     case 'paused':
       return <>All folders are paused. Resume to catch up.</>
+    case 'paused-until':
+      return <>Nothing is committed, pulled, or pushed until then. It turns back on by itself.</>
     case 'git-missing':
       return <>AutoSync needs git to do anything. See the banner above.</>
     case 'attention':

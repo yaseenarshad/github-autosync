@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import type { AutoSyncApi } from '@shared/api'
-import { isGitHubUrl } from '@shared/status'
+import { isGitHubUrl, MINUTE_MS } from '@shared/status'
 import type { AppStatus, NavTarget } from '@shared/types'
 import { channel, type Invokable } from '../channels'
 import { folderMenuTemplate } from './folderMenu'
@@ -104,6 +104,15 @@ export function registerIpc(deps: IpcDeps): void {
       return listSubfolders(bin, folderPath(id), rel)
     },
     pushOutside: (id) => manager.pushOutside(id),
+    pauseFolder: async (id, minutes) =>
+      change((c) => ({
+        ...c,
+        folders: c.folders.map((f) => {
+          if (f.id !== id) return f
+          const { pausedUntil: _old, ...rest } = f
+          return minutes === null ? rest : { ...rest, pausedUntil: Date.now() + minutes * MINUTE_MS }
+        }),
+      })),
     showInFinder: async (id) => {
       const failure = await shell.openPath(folderPath(id))
       if (failure !== '') throw new Error(failure)
@@ -127,6 +136,7 @@ export function registerIpc(deps: IpcDeps): void {
         openInTerminal: () => quietly(api.openInTerminal(id)),
         openInEditor: () => quietly(api.openInEditor(id)),
         clearAlias: () => quietly(api.setAlias(id, null)),
+        pause: (minutes) => quietly(api.pauseFolder(id, minutes)),
       })
       // No `window`: the popup goes to the focused window, which is the one that was right-clicked.
       Menu.buildFromTemplate(template).popup()

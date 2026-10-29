@@ -41,6 +41,7 @@ function folder(name: string, dir: string, extra: Partial<FolderStatus>): Folder
     sendAt: null,
     retryAt: null,
     pullAt: null,
+    pausedUntil: null,
     ...extra,
   }
 }
@@ -242,6 +243,7 @@ export function createFakeApi(): AutoSyncApi {
     pickSettingsFolder: () => Promise.resolve(window.prompt('Settings folder (fake picker)', `${HOME}/Documents/GitHub/yaseen-os/Sync/github-autosync-settings`)),
     setSettingsFolder: (settingsFolder) => set({ ...status, settingsFolder }),
     listFolders: async (_id, rel) => (rel === '' ? ['docs', 'evals', 'app'] : rel.split('/').length < 3 ? [`${rel}/notes`, `${rel}/drafts`] : []),
+    pauseFolder: (id, minutes) => patch(id, { pausedUntil: minutes === null ? null : Date.now() + minutes * MIN, state: minutes === null ? 'synced' : 'off' }),
     pushOutside: (id) => patch(id, { outside: [] }).then(() => undefined),
     showFolderMenu: async (id) => console.info('showFolderMenu (native in Electron)', id),
     // Fake ids are the folder names.

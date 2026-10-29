@@ -212,6 +212,10 @@ void app.whenReady().then(() => {
     syncAll: () => void manager.syncNow(null),
     quit: () => app.quit(),
   })
+  // D51: a pause for a while that ended while the app was closed is over.
+  if (registry.get().folders.some((f) => f.pausedUntil !== undefined && f.pausedUntil <= Date.now())) {
+    registry.update((c) => ({ ...c, folders: c.folders.map(({ pausedUntil, ...f }) => (pausedUntil !== undefined && pausedUntil > Date.now() ? { ...f, pausedUntil } : f)) }))
+  }
   // D35: settings taken from another computer apply at once.
   settingsFolder = followSettingsFolder(registry, {
     host: HOST,

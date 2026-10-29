@@ -121,6 +121,8 @@ export interface FolderStatus {
   retryAt: number | null
   /** D52: when the next pull runs; null when none is armed (pulls by hand, or Auto's send is about to pull). */
   pullAt: number | null
+  /** D51: off until then (ms epoch), then on again by itself; null when not paused for a while. */
+  pausedUntil: number | null
 }
 
 export interface AppStatus {

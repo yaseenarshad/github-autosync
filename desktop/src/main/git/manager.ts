@@ -129,6 +129,8 @@ interface Entry {
   /** D39: the next pull, or the check on an open PR (D26). */
   poll: Timer | null
   peek: Timer | null
+  /** D51: turns the folder back on when its pause for a while ends. */
+  wake: Timer | null
   sendAt: number | null
   retryAt: number | null
   /** D52: when the next pull runs; null while none is armed. */
@@ -185,6 +187,7 @@ function fresh(cfg: FolderConfig): Entry {
     retry: null,
     poll: null,
     peek: null,
+    wake: null,
     sendAt: null,
     retryAt: null,
     pullAt: null,
@@ -216,6 +219,9 @@ function stateOf(e: Entry): SyncState {
 }
 
 const settingsOf = (e: Entry): RepoSettings => e.cfg.settings ?? DEFAULT_SETTINGS
+
+/** D51: the end of a pause for a while that has not ended yet. */
+const pausedUntil = (cfg: FolderConfig): number | null => (cfg.pausedUntil !== undefined && cfg.pausedUntil > Date.now() ? cfg.pausedUntil : null)
 
 /** D22/D29: PR mode is the rules' call, and only on the branch they govern. */
 const publishVia = (e: Entry): PublishVia => (e.policy?.requiresPr === true && e.branch === e.policy.defaultBranch ? 'pr' : 'push')
@@ -250,6 +256,7 @@ function toStatus(e: Entry): FolderStatus {
     sendAt: e.sendAt,
     retryAt: e.retryAt,
     pullAt: e.pullAt,
+    pausedUntil: pausedUntil(e.cfg),
   }
 }
 
@@ -315,6 +322,8 @@ export function createSyncManager(host: SyncHost): SyncManager {
 
   /** Registry order. */
   let entries = new Map<string, Entry>()
+  /** The app-wide pause, as last handed in. */
+  let appPaused = false
 
   const current = (e: Entry): boolean => entries.get(e.cfg.id) === e
 
@@ -508,6 +517,19 @@ export function createSyncManager(host: SyncHost): SyncManager {
     void requestPass(e, startMode(e))
   }
 
+  /** D51: one timer per folder paused for a while; it turns the folder on with a pass, unless something else keeps it off. */
+  function armWake(e: Entry): void {
+    if (e.wake !== null) clearTimeout(e.wake)
+    e.wake = null
+    const until = current(e) ? pausedUntil(e.cfg) : null
+    if (until === null) return
+    e.wake = arm(until - Date.now(), () => {
+      e.wake = null
+      if (current(e) && !e.active && e.cfg.enabled && !appPaused && pausedUntil(e.cfg) === null) activate(e)
+      host.onChange()
+    })
+  }
+
   /** Watcher closed and every timer cleared. A pass already running finishes, but arms nothing and runs no follow-up. */
   function deactivate(e: Entry): void {
     e.active = false
@@ -519,15 +541,21 @@ export function createSyncManager(host: SyncHost): SyncManager {
 
   return {
     setFolders(folders, paused) {
+      appPaused = paused
       const next = new Map<string, Entry>()
       for (const cfg of folders) next.set(cfg.id, entries.get(cfg.id) ?? fresh(cfg))
-      for (const [id, e] of entries) if (!next.has(id)) deactivate(e)
+      for (const [id, e] of entries) {
+        if (next.has(id)) continue
+        deactivate(e)
+        armWake(e)
+      }
       entries = next
       for (const cfg of folders) {
         const e = next.get(cfg.id) as Entry
         const before = settingsOf(e)
         e.cfg = cfg
-        const wanted = cfg.enabled && !paused
+        armWake(e)
+        const wanted = cfg.enabled && !paused && pausedUntil(cfg) === null
         if (wanted && !e.active) activate(e)
         else if (!wanted && e.active) deactivate(e)
         else if (e.active && JSON.stringify(before) !== JSON.stringify(settingsOf(e))) retime(e)

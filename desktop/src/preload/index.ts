@@ -47,6 +47,7 @@ const api: AutoSyncApi = {
   setSettingsFolder: (path) => ipcRenderer.invoke(channel('setSettingsFolder'), path),
   listFolders: (id, rel) => ipcRenderer.invoke(channel('listFolders'), id, rel),
   pushOutside: (id) => ipcRenderer.invoke(channel('pushOutside'), id),
+  pauseFolder: (id, minutes) => ipcRenderer.invoke(channel('pauseFolder'), id, minutes),
   showInFinder: (id) => ipcRenderer.invoke(channel('showInFinder'), id),
   openExternal: (url) => ipcRenderer.invoke(channel('openExternal'), url),
   copyText: (text) => ipcRenderer.invoke(channel('copyText'), text),

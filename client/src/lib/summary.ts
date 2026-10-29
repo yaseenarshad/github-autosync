@@ -1,8 +1,8 @@
 import type { AppStatus, Attention, FolderStatus, SyncState } from '@shared/types'
-import { byWorst, plural } from '@shared/status'
+import { byWorst, clock, plural } from '@shared/status'
 
 /** Which status-card variant a folder shows; `cls` is the dot/tag colour for it. */
-export type ViewKind = 'off' | 'paused' | 'git-missing' | 'attention' | 'syncing' | 'offline' | 'pending' | 'synced'
+export type ViewKind = 'off' | 'paused' | 'paused-until' | 'git-missing' | 'attention' | 'syncing' | 'offline' | 'pending' | 'synced'
 
 export interface FolderView {
   kind: ViewKind
@@ -47,6 +47,7 @@ function attentionShort(a: Attention): string {
 export function folderView(f: FolderStatus, app: Globals): FolderView {
   if (!f.enabled) return { kind: 'off', cls: 'off', short: 'Sync off', head: 'Sync is off for this folder', icon: 'pause' }
   if (app.paused) return { kind: 'paused', cls: 'off', short: 'Paused', head: 'Syncing is paused', icon: 'pause' }
+  if (f.pausedUntil !== null) return { kind: 'paused-until', cls: 'off', short: `Paused until ${clock(f.pausedUntil)}`, head: `Paused until ${clock(f.pausedUntil)}`, icon: 'pause' }
   if (app.gitMissing) return { kind: 'git-missing', cls: 'attention', short: 'Git not found', head: "Git isn't installed", icon: 'alert' }
   if (f.state === 'attention' && f.attention) {
     // Keep-both conflicts don't stop syncing (D6); every other problem does.

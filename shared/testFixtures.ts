@@ -33,6 +33,7 @@ export function makeFolder(extra: Partial<FolderStatus> = {}): FolderStatus {
     sendAt: null,
     retryAt: null,
     pullAt: null,
+    pausedUntil: null,
     ...extra,
   }
 }

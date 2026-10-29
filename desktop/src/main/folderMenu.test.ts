@@ -7,12 +7,26 @@ import { makeFolder } from '@shared/testFixtures'
 const MAC: FolderMenuContext = { paused: false, gitMissing: false, platform: 'darwin' }
 
 function actions(): { [K in keyof FolderMenuActions]: ReturnType<typeof vi.fn> } {
-  return { navigate: vi.fn(), syncNow: vi.fn(), copy: vi.fn(), viewOnGitHub: vi.fn(), showInFinder: vi.fn(), openInTerminal: vi.fn(), openInEditor: vi.fn(), clearAlias: vi.fn() }
+  return { navigate: vi.fn(), syncNow: vi.fn(), copy: vi.fn(), viewOnGitHub: vi.fn(), showInFinder: vi.fn(), openInTerminal: vi.fn(), openInEditor: vi.fn(), clearAlias: vi.fn(), pause: vi.fn() }
 }
 
 const labels = (items: MenuItemConstructorOptions[]) => items.map((i) => (i.type === 'separator' ? '---' : i.label))
 const item = (items: MenuItemConstructorOptions[], label: string) => items.find((i) => i.label === label) as MenuItemConstructorOptions
 const click = (items: MenuItemConstructorOptions[], label: string) => (item(items, label).click as () => void)()
+
+describe('pause for a while in the folder menu (D51)', () => {
+  it('offers the two pauses on an enabled folder, Resume now while one runs, and neither on a folder that is off', () => {
+    const a = actions()
+    click(folderMenuTemplate(makeFolder(), MAC, a), 'Pause for 4 hours')
+    expect(a.pause).toHaveBeenCalledWith(240)
+    const paused = folderMenuTemplate(makeFolder({ pausedUntil: Date.now() + 60_000, state: 'off' }), MAC, a)
+    expect(labels(paused)).toContain('Resume now')
+    expect(labels(paused)).not.toContain('Pause for 1 hour')
+    click(paused, 'Resume now')
+    expect(a.pause).toHaveBeenLastCalledWith(null)
+    expect(labels(folderMenuTemplate(makeFolder({ enabled: false, state: 'off' }), MAC, a))).not.toContain('Pause for 1 hour')
+  })
+})
 
 describe('folderMenuTemplate (D18)', () => {
   it('lists every item, grouped, for a GitHub folder that needs the user and has a nickname', () => {
@@ -20,6 +34,9 @@ describe('folderMenuTemplate (D18)', () => {
     expect(labels(folderMenuTemplate(f, MAC, actions()))).toEqual([
       'Sync now',
       'Turn off syncing…',
+      '---',
+      'Pause for 1 hour',
+      'Pause for 4 hours',
       '---',
       'Copy folder name',
       'Copy path',

@@ -37,6 +37,8 @@ export interface AutoSyncApi {
   listFolders(id: string, rel: string): Promise<string[]>
   /** D46: one send that also takes the changes outside the picked folders; resolves when it is done. */
   pushOutside(id: string): Promise<void>
+  /** D51: off for `minutes`, then on again by itself; null resumes now. */
+  pauseFolder(id: string, minutes: number | null): Promise<AppStatus>
 
   showInFinder(id: string): Promise<void>
   /** Only `https://github.com/…` URLs are opened. */

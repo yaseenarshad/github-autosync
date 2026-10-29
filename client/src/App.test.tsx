@@ -36,6 +36,7 @@ function mockApi(status: AppStatus) {
     setSettingsFolder: vi.fn(async () => status),
     listFolders: vi.fn(async (_id: string, rel: string): Promise<string[]> => (rel === '' ? ['docs', 'app'] : [])),
     pushOutside: vi.fn(async () => {}),
+    pauseFolder: vi.fn(async () => status),
     showInFinder: vi.fn(),
     openExternal: vi.fn(),
     copyText: vi.fn(),
@@ -330,6 +331,21 @@ describe('sync settings (D34, D35)', () => {
     })
     await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
     expect(api.setRepoSettings).toHaveBeenLastCalledWith('notes', { push: 'auto', pull: 1, paths: null, beforePush: './save-for-git.sh' })
+  })
+
+  it('pauses a folder for an hour (D51)', async () => {
+    const api = await mount(oneFolder)
+    await click(button('notes'))
+    await click(button('1 hour'))
+    expect(api.pauseFolder).toHaveBeenCalledWith('notes', 60)
+  })
+
+  it('a folder paused for a while says until when, and Resume now ends it (D51)', async () => {
+    const paused = await mount(makeStatus([makeFolder({ id: 'notes', name: 'notes', state: 'off', pausedUntil: Date.now() + 3_600_000 })]))
+    await click(button('notes'))
+    expect(document.querySelector('.status .h')?.textContent).toMatch(/^Paused until /)
+    await click(button('Resume now'))
+    expect(paused.pauseFolder).toHaveBeenCalledWith('notes', null)
   })
 
   it('Settings chooses the settings folder, and Stop sharing clears it', async () => {

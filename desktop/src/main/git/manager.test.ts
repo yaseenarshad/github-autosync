@@ -715,6 +715,27 @@ describe('push and pull per repo (D37 to D42, D52)', () => {
     h.manager.setFolders([], false)
   })
 
+  it('a pause for a while keeps the folder off, then turns it on with a pass; Resume now ends it early (D51)', async () => {
+    const h = harness()
+    h.manager.setFolders([{ ...A, pausedUntil: Date.now() + 80 }], false)
+    expect(h.status()).toMatchObject({ state: 'off', pausedUntil: expect.any(Number) })
+    expect(h.watching()).toBe(0)
+    await sleep(40)
+    expect(h.passes).toHaveLength(0)
+    await until(() => h.passes.length === 1)
+    expect(h.status().pausedUntil).toBeNull()
+
+    const r = harness()
+    r.manager.setFolders([{ ...A, pausedUntil: Date.now() + NEVER }], false)
+    r.manager.setFolders([A], false) // Resume now: the app drops `pausedUntil`
+    await until(() => r.passes.length === 1)
+    // The app-wide pause still wins over a pause that has ended.
+    const p = harness()
+    p.manager.setFolders([{ ...A, pausedUntil: Date.now() + 30 }], true)
+    await sleep(80)
+    expect(p.passes).toHaveLength(0)
+  })
+
   it('a settings change re-times at once: Auto to by hand drops the armed send', async () => {
     const h = harness({ quietMs: NEVER, minuteMs: NEVER })
     h.manager.setFolders([A], false)
