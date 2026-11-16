@@ -2,6 +2,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { mayHoldCards, uniteCardLines } from '@shared/cardMerge'
 import { git, zList } from './exec'
 
 /**
@@ -69,8 +70,12 @@ async function keepBoth(bin: string, root: string, rel: string, copies: Map<stri
   const temps = (res.stdout.split('\t')[0] ?? '').trim().split(' ').map((name) => (name === '.' ? null : path.join(root, name)))
   if (temps.length !== 3) return null
   const [base, upstream, local] = temps
-  if (base) await rm(base, { force: true })
   await mkdir(path.dirname(abs(root, rel)), { recursive: true })
+  if (base && upstream && local && MARKDOWN_RE.test(rel) && (await mergeCards(bin, root, base, upstream, local, abs(root, rel)))) {
+    await rm(local, { force: true })
+    return [rel]
+  }
+  if (base) await rm(base, { force: true })
   if (upstream && local) {
     const copy = copies.get(rel) ?? freeCopyName(root, rel, host, now)
     copies.set(rel, copy)
@@ -82,6 +87,48 @@ async function keepBoth(bin: string, root: string, rel: string, copies: Map<stri
   if (!kept) return null
   await rename(kept, abs(root, rel))
   return [rel]
+}
+
+const MARKDOWN_RE = /\.md$/i
+
+/**
+ * THE CARD RULE (YAZ-5654): a Markdown page whose only clash is card lines changed on both sides (one card answered on
+ * two computers) is merged, and no copy is made. The rule (`uniteCardLines`) gives both sides the same card line for
+ * each card both changed; then `git merge-file` merges the three versions. Only when the rule changed something, and
+ * only on a clean merge (exit 0), the result goes at `dest` by a rename and the base's temp file goes. Anything else
+ * (a clash in another line, a file that is not UTF-8, no card changed on both sides) answers false and leaves the
+ * three temp files as git wrote them, so keep-both is byte for byte as before.
+ */
+async function mergeCards(bin: string, root: string, base: string, upstream: string, local: string, dest: string): Promise<boolean> {
+  const [b, t, m] = (await Promise.all([base, upstream, local].map((file) => readFile(file)))).map(utf8)
+  if (b === null || t === null || m === null || !mayHoldCards(t) || !mayHoldCards(m)) return false
+  const [theirs, mine] = uniteCardLines(b, t, m)
+  if (theirs === t && mine === m) return false
+  // The united sides go in files of their own beside git's, so a clash leaves git's untouched.
+  const [current, other] = [`${upstream}.cards`, `${local}.cards`]
+  try {
+    await writeFile(current, theirs)
+    await writeFile(other, mine)
+    // No `-p`: git writes the merge into `current`, so no page passes through a stdout buffer.
+    if ((await git(bin, root, ['merge-file', '-q', '--', current, base, other])).code !== 0) return false
+    await rename(current, dest)
+    await rm(base, { force: true })
+    await rm(upstream, { force: true })
+    return true
+  } finally {
+    await rm(current, { force: true })
+    await rm(other, { force: true })
+  }
+}
+
+/** The bytes as text when they are UTF-8 that reads back to the same bytes (a byte order mark kept), else null. */
+function utf8(bytes: Buffer): string | null {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+    return Buffer.from(text, 'utf8').equals(bytes) ? text : null
+  } catch {
+    return null
+  }
 }
 
 /** `a/Note.md` → `a/Note (conflict Mac-A, 2026-09-27).md`, numbered past anything already there. */

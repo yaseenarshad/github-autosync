@@ -11,6 +11,7 @@
 - A repo can run a command before each push (for example `./save-for-git.sh`); if it fails, nothing is pushed.
 - Pulls by rebasing your unpushed commits onto GitHub's — never a merge commit.
 - The same file changed on two computers: GitHub's version stays, yours is kept beside it as `<name> (conflict <computer>, <date>)<ext>`. Syncing keeps going.
+- One exception: a Markdown page where the only clash is card lines (the same Yaseen Docs card answered on two computers) is merged into one page with every review, and no copy is made.
 - Files of 95 MiB or more are never committed (GitHub refuses them); they are listed as too big.
 - A repo mid-rebase, mid-merge or on a detached HEAD is left alone until you finish.
 - `.gitignore` is the only filter. What git ignores is not even watched, so a big ignored folder (a `.venv`, a build folder) costs nothing.

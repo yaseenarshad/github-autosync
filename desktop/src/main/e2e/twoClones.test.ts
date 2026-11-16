@@ -97,6 +97,28 @@ describe('5A: two clones through the real manager', { timeout: REAL_GIT_TIMEOUT_
     expect((await a.sync()).attention).toBeNull()
   })
 
+  it('the same card answered on both (YAZ-5654): one page with both reviews on both computers, no copy, no attention', async () => {
+    const { a, b } = await twoComputers()
+    const page = (line: string) => `# Words\n\n\`\`\`card\nHola\n---\nHello\n\`\`\`\n<!-- card: ${line} -->\n`
+    await a.repo.write('words.md', page('YAZ-7, 2026-11-01T09:00:00.000Z good'))
+    await a.sync()
+    await b.sync()
+    await a.repo.write('words.md', page('YAZ-7, 2026-11-01T09:00:00.000Z good, 2026-11-16T09:00:00.123Z good'))
+    await b.repo.write('words.md', page('YAZ-7, 2026-11-01T09:00:00.000Z good, 2026-11-16T09:00:05.456Z again'))
+
+    await b.sync() // B wins the race to GitHub
+    const onA = await a.sync()
+    const onB = await b.sync()
+
+    const united = page('YAZ-7, 2026-11-01T09:00:00.000Z good, 2026-11-16T09:00:00.123Z good, 2026-11-16T09:00:05.456Z again')
+    for (const [side, status] of [[a, onA], [b, onB]] as const) {
+      expect(status).toMatchObject({ state: 'synced', attention: null })
+      expect(await side.repo.read('words.md')).toBe(united)
+      expect(await side.repo.run(['status', '--porcelain', '--untracked-files=all'])).toBe('')
+      expect(await side.repo.run(['ls-files'])).toBe('note.md\nwords.md')
+    }
+  })
+
   it('a 150 MB file on A is held back as too big while everything else syncs', async () => {
     const { a, b } = await twoComputers()
     await a.repo.write('video.mov', '')
