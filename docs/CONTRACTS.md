@@ -5,6 +5,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
 - `shared/types.ts` — every shape the window and the menu bar render.
 - `shared/api.ts` — what the renderer can ask of the main process (`window.autosync`).
 - `shared/status.ts` — rules both sides must agree on: cadence, worst state, the summary line, time and plural wording.
+- `shared/cardMerge.ts` — the card rule of sync (`uniteCardLines`), a copy of the Docs app's rule. Pure: no fs.
 - `desktop/src/main/git/` — the engine: `sync.ts` (one pass), `pullRequest.ts` (its PR route), `pass.ts` (what both routes share), `github.ts` (the gh seam), `manager.ts` (when passes run), `resolve.ts` (keep-both), `detect.ts` (read-only facts), `exec.ts` (the only child process), `activity.ts` (history).
 
 ## 1. Status model
@@ -99,6 +100,7 @@ How the app behaves, in one place. The code is the source of truth; this names w
    - What is ours to push is counted after the rebase.
    - A held-back tracked file (too big, in use, or outside the picks) is stashed around the rebase and copied back afterwards. The stash is only restored and dropped if `refs/stash` moved, so the user's own stashes are never touched.
    - Same-file conflicts are resolved with keep-both (`resolve.ts`): GitHub's version stays at the path and this computer's goes beside it as the conflict copy. When one side deleted the file and the other edited it, the edit wins.
+   - The card rule (YAZ-5654), first: for a `.md` file (any letter case) that both sides changed, with a base, and UTF-8 on all three sides, `uniteCardLines` gives each card that both sides changed (by ID) the same card line on both sides: the union of the reviews (a review is its full millisecond time and its rating; one that one side removed and the other left as it was stays removed), and a three-way result for the marks, the title and each property. Only when that changed something, `git merge-file` merges base, GitHub's side and this computer's side; a clean merge (exit 0) goes at the path by a rename, and no copy is made. Anything else (a clash in another line, no base, not UTF-8, not `.md`, a card on one side only) keeps both, byte for byte as before.
    - Saves made while the rebase was stopped are parked and put back.
    - Anything unexpected aborts the rebase back to the starting tree.
 5. **Push.** Never on a quiet pass (D40): it ends with its commits here. Before a push, AutoSync's own unpushed commits fold into one when every one of them is `sync (<this host>)` (D41). `-u origin HEAD` on the first push. A push that lost a race to another computer re-runs the exchange once. The quit flush uses a 5 s push cap.
