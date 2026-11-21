@@ -44,6 +44,14 @@
       "identity": null,
       "category": "public.app-category.developer-tools"
     },
+    "protocols": [
+      {
+        "name": "GitHub AutoSync",
+        "schemes": [
+          "github-autosync"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {

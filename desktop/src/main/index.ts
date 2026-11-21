@@ -5,12 +5,14 @@ import { pushLabel } from '@shared/status'
 import type { AppStatus, NavTarget, OtherRepo } from '@shared/types'
 import { NAVIGATE_CHANNEL, STATUS_CHANNEL } from '../channels'
 import { findGit } from './git/exec'
+import { checkFolder } from './git/detect'
 import { createSyncManager } from './git/manager'
+import { parseAddFolderUrl } from './deepLink'
 import { forgetInFlight } from './git/pullRequest'
 import { hostName, peekPending, syncFolder } from './git/sync'
 import { registerIpc, throttle } from './ipc'
 import { createNoticeRules, type Notice } from './notify'
-import { createRegistry, settingsOf, withLearnedRemotes } from './registry'
+import { createRegistry, newFolder, settingsOf, withLearnedRemotes } from './registry'
 import { followSettingsFolder, type SettingsFolder } from './settingsFolder'
 import { findClones, othersFrom } from './others'
 import { createTray } from './tray'
@@ -261,7 +263,48 @@ function appMenu(): Menu | null {
   return Menu.buildFromTemplate(template)
 }
 
-app.on('second-instance', () => {
+/** YAZ-6190 D3: handle `github-autosync://add?path=<absPath>` from Docs App (cold start or running). */
+const pendingAddUrls: string[] = []
+async function handleDeepLink(rawUrl: string): Promise<void> {
+  const folderPath = parseAddFolderUrl(rawUrl)
+  if (folderPath === null) return
+  if (!app.isReady()) {
+    pendingAddUrls.push(rawUrl)
+    return
+  }
+  const existing = registry.get().folders.find((f) => f.path === folderPath)
+  if (existing !== undefined) {
+    if (!existing.enabled) {
+      registry.update((c) => ({ ...c, folders: c.folders.map((f) => (f.id === existing.id ? { ...f, enabled: true } : f)) }))
+      apply()
+    }
+    navigate({ folderId: existing.id })
+    return
+  }
+  const verdict = await checkFolder(folderPath, registry.get().folders.map((f) => f.path))
+  if (verdict.ok) {
+    const added = newFolder(folderPath)
+    registry.update((c) => (c.folders.some((f) => f.path === folderPath) ? c : { ...c, folders: [...c.folders, added] }))
+    apply()
+    findOthers()
+    navigate({ folderId: added.id })
+  } else {
+    showWindow()
+  }
+}
+
+if (app.isPackaged) app.setAsDefaultProtocolClient('github-autosync')
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  void handleDeepLink(url)
+})
+
+app.on('second-instance', (_event, argv) => {
+  const deepLink = argv.find((a) => a.startsWith('github-autosync://'))
+  if (deepLink !== undefined) {
+    void handleDeepLink(deepLink)
+    return
+  }
   if (app.isReady()) showWindow()
 })
 
@@ -304,6 +347,7 @@ void app.whenReady().then(() => {
     },
   })
   apply() // D3: app start is a pass per enabled folder
+  while (pendingAddUrls.length > 0) void handleDeepLink(pendingAddUrls.shift()!)
   // D3: a lid that just opened is when the other computer's changes are most likely waiting.
   powerMonitor.on('resume', () => manager.notifyWake())
   powerMonitor.on('unlock-screen', () => manager.notifyWake())
